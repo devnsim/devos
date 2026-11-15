@@ -9,4 +9,5 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 LOG="$HOME/.cache/devos.log"
 mkdir -p "$(dirname "$LOG")"
 
-exec nix-shell --run "python -m app.main" >"$LOG" 2>&1
+# First launch builds the C++ engine (core/ -> core/build/); if that fails DevOS uses NumPy.
+exec nix-shell --run "python -m app.native.build --if-missing; python -m app.main" >"$LOG" 2>&1
