@@ -13,6 +13,10 @@ let
     pyside6
     psutil      # System and device stats
     pybind11    # C++ <-> Python bindings
+    numpy       # n-dimensional arrays (Tensor4D)
+    pyqtgraph   # fast plots: waterfall + 3D scatter (runs on PySide6)
+    pyopengl    # OpenGL for pyqtgraph's 3D view
+    trimesh     # CAD mesh import (.stl / .obj) for the wave simulator
   ]);
 in
 pkgs.mkShell {

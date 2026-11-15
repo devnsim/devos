@@ -8,8 +8,18 @@
 # CONTRACT:
 #   - Requires: nothing (no imports). Widgets must set objectName to match the #selectors below:
 #               nav_sidebar_panel, sidebar_header_panel, app_title_label, sidebar_section_label,
-#               sidebar_item_btn, open_sidebar_btn, close_sidebar_btn, top_bar, top_bar_title_label,
-#               page_title_label, page_subtitle_label, stat_card, card_title_label, card_value_label
+#               sidebar_folder_btn, sidebar_item_btn, open_sidebar_btn, close_sidebar_btn, tab_bar_panel,
+#               page_tab_bar, tab_close_btn, empty_tab_label, split_pane_btn, close_pane_btn,
+#               drop_overlay_panel,
+#               page_title_label, page_subtitle_label, stat_card, card_title_label, card_value_label,
+#               module_panel, module_title_label, calendar_month_label, calendar_nav_btn,
+#               calendar_weekday_label, calendar_day_btn, calendar_selected_label,
+#               module_canvas_panel, module_tile_panel, module_header_panel, module_tile_btn,
+#               module_body_panel, empty_module_label, tensor_inspector_panel, inspector_controls_panel,
+#               inspector_control_label, inspector_stats_label, scatter_unavailable_label, live_toggle_btn,
+#               rf_inspector_panel, rf_controls_panel, rf_source_label, rf_stats_label, rf_material_summary_label,
+#               module_library_bar, module_library_label, module_library_hint_label, add_module_btn,
+#               module_picker_panel, wave_sim_panel; property is_active_tile on #module_header_panel
 #   - Exposes: STYLESHEET (str) and every *_COLOR / *_PX token, for widgets that need a color in code.
 # NOTES:
 #   - [2026-11-14] Fixed "//*" comment typo before the sidebar rules; QSS only understands /* */,
@@ -20,6 +30,16 @@
 #                  to snake_case (e.g. #Sidebar -> #nav_sidebar_panel); widgets must match.
 #   - [2026-11-14] Hard-coded "#2c2c2c", "#4a4a4a" and "white" moved into named palette colors.
 #   - [2026-11-14] #activity_title_label (home page "Activity" heading) styled with #page_title_label.
+#   - [2026-11-15] Added #sidebar_folder_btn (collapsible folder row) and indented nested items
+#                  with #sidebar_item_btn[is_nested="true"].
+#   - [2026-11-15] Nested-item indent now uses the nest_level property (levels 1-3) on items and folders.
+#   - [2026-11-15] Split panes: #split_pane_btn, #close_pane_btn, #drop_overlay_panel, DROP_HIGHLIGHT_COLOR,
+#                  and the active-pane accent #page_tab_bar[is_active_group="true"].
+#   - [2026-11-15] TOP_BAR_QSS (#top_bar, #top_bar_title_label) replaced by TAB_AREA_QSS for the tab row.
+#   - [2026-11-15] Added MODULE_QSS [3.8]: shared #module_panel frame plus the calendar module's rules
+#                  (day cells use is_today / is_outside_month / is_weekend properties). Later sections
+#                  renumbered 3.9-3.17.
+#   - [2026-11-15] MODULE_QSS: module canvas tiles (#module_tile_panel, #module_header_panel...).
 # ==============================================================================
 
 # ==============================================================================
@@ -46,19 +66,20 @@
 #    3.1 base_qss
 #    3.2 menu_and_status_qss
 #    3.3 sidebar_qss
-#    3.4 top_bar_qss
+#    3.4 tab_area_qss
 #    3.5 splitter_qss
 #    3.6 page_heading_qss
 #    3.7 stat_card_qss
-#    3.8 button_qss
-#    3.9 input_qss
-#    3.10 item_view_qss
-#    3.11 group_box_qss
-#    3.12 tab_qss
-#    3.13 dock_qss
-#    3.14 progress_bar_qss
-#    3.15 scroll_bar_qss
-#    3.16 tooltip_qss
+#    3.8 module_qss
+#    3.9 button_qss
+#    3.10 input_qss
+#    3.11 item_view_qss
+#    3.12 group_box_qss
+#    3.13 tab_qss
+#    3.14 dock_qss
+#    3.15 progress_bar_qss
+#    3.16 scroll_bar_qss
+#    3.17 tooltip_qss
 # 4. STYLESHEET_ASSEMBLY
 #    4.1 stylesheet
 # ==============================================================================
@@ -100,6 +121,7 @@ ACCENT_HIGHLIGHT_COLOR = "#3a79ad"
 ALTERNATE_ROW_COLOR    = "#2c2c2c"   # every other row in tables / lists
 SCROLLBAR_HOVER_COLOR  = "#4a4a4a"
 SELECTED_TEXT_COLOR    = "#ffffff"   # text on ACCENT_COLOR backgrounds
+DROP_HIGHLIGHT_COLOR   = "rgba(58, 121, 173, 40)"   # see-through ACCENT_HIGHLIGHT_COLOR over drop targets
 # --- END [2.1] ---
 
 # ==============================================================================
@@ -164,18 +186,55 @@ SIDEBAR_QSS = f"""
 }}
 #sidebar_item_btn:hover   {{ background: {HOVER_COLOR}; }}
 #sidebar_item_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
+#sidebar_folder_btn {{
+    background: transparent;
+    border: none;
+    border-radius: {CORNER_RADIUS_PX}px;
+    padding: 5px 8px;
+    margin: 0px 6px;
+    text-align: left;
+    color: {TEXT_COLOR};
+}}
+#sidebar_folder_btn:hover {{ background: {HOVER_COLOR}; }}
+/* Indent per folder level (nest_level is set in sidebar.py); base margin is 6px */
+#sidebar_item_btn[nest_level="1"], #sidebar_folder_btn[nest_level="1"] {{ margin-left: 28px; }}
+#sidebar_item_btn[nest_level="2"], #sidebar_folder_btn[nest_level="2"] {{ margin-left: 50px; }}
+#sidebar_item_btn[nest_level="3"], #sidebar_folder_btn[nest_level="3"] {{ margin-left: 72px; }}
 #open_sidebar_btn, #close_sidebar_btn {{ background: transparent; border: none; padding: 3px; }}
 #open_sidebar_btn:hover, #close_sidebar_btn:hover {{ background: {HOVER_COLOR}; }}
 """
 # --- END [3.3] ---
 
 # ==============================================================================
-# [3.4] top_bar_qss
+# [3.4] tab_area_qss
 # ==============================================================================
-TOP_BAR_QSS = f"""
-/* ---------- Top bar above pages ---------- */
-#top_bar {{ background: {BACKGROUND_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; }}
-#top_bar_title_label {{ background: transparent; font-weight: 600; }}
+TAB_AREA_QSS = f"""
+/* ---------- Tab area (Obsidian-style tabs above pages) ---------- */
+#tab_bar_panel {{ background: {PANEL_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; }}
+#page_tab_bar {{ background: transparent; }}
+#page_tab_bar::tab {{
+    background: transparent;
+    border: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 6px 6px 10px;
+    margin: 4px 1px 0px 1px;
+    min-width: 80px;
+    max-width: 200px;
+    border-top: 2px solid transparent;
+    color: {MUTED_TEXT_COLOR};
+}}
+#page_tab_bar::tab:selected {{ background: {BACKGROUND_COLOR}; color: {TEXT_COLOR}; }}
+/* With 2+ panes, the active pane's selected tab gets an accent line (set in tab_group.py) */
+#page_tab_bar[is_active_group="true"]::tab:selected {{ border-top: 2px solid {ACCENT_HIGHLIGHT_COLOR}; }}
+#page_tab_bar::tab:hover:!selected {{ background: {HOVER_COLOR}; }}
+#tab_close_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 1px; }}
+#tab_close_btn:hover {{ background: {HOVER_COLOR}; }}
+#split_pane_btn, #close_pane_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 3px; }}
+#split_pane_btn:hover, #close_pane_btn:hover {{ background: {HOVER_COLOR}; }}
+/* Shown over a pane's page area while a dragged tab hovers it */
+#drop_overlay_panel {{ background: {DROP_HIGHLIGHT_COLOR}; border: 1px solid {ACCENT_HIGHLIGHT_COLOR}; }}
+#empty_tab_label {{ color: {MUTED_TEXT_COLOR}; font-size: 13px; }}
 """
 # --- END [3.4] ---
 
@@ -220,7 +279,63 @@ STAT_CARD_QSS = f"""
 # --- END [3.7] ---
 
 # ==============================================================================
-# [3.8] button_qss
+# [3.8] module_qss
+# ==============================================================================
+MODULE_QSS = f"""
+/* ---------- Modules (self-contained panels hosted by pages) ---------- */
+#module_panel {{ background: {PANEL_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: 0px; }}
+#module_panel QLabel {{ background: transparent; }}
+#module_title_label {{ font-weight: 600; }}
+/* Calendar module */
+#calendar_month_label {{ color: {TEXT_COLOR}; }}
+#calendar_selected_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; }}
+#calendar_nav_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 1px 6px; }}
+#calendar_nav_btn:hover {{ background: {HOVER_COLOR}; }}
+#calendar_weekday_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; padding: 2px 0px; }}
+#calendar_weekday_label[is_weekend="true"] {{ color: {SCROLLBAR_HOVER_COLOR}; }}
+#calendar_day_btn {{
+    background: {BACKGROUND_COLOR};
+    border: 1px solid transparent;
+    border-radius: {CORNER_RADIUS_PX}px;
+    color: {TEXT_COLOR};
+}}
+#calendar_day_btn[is_weekend="true"] {{ color: {MUTED_TEXT_COLOR}; }}
+#calendar_day_btn[is_outside_month="true"] {{ background: transparent; color: {SCROLLBAR_HOVER_COLOR}; }}
+#calendar_day_btn:hover {{ background: {HOVER_COLOR}; }}
+#calendar_day_btn[is_today="true"] {{ border: 1px solid {ACCENT_HIGHLIGHT_COLOR}; font-weight: 600; }}
+#calendar_day_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
+/* Module canvas: tiles snap into a splitter grid (module_canvas.py) */
+#module_canvas_panel {{ background: {BACKGROUND_COLOR}; }}
+#module_tile_panel {{ background: {PANEL_COLOR}; border: 1px solid {BORDER_COLOR}; }}
+#module_header_panel {{ background: {HEADER_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; }}
+#module_header_panel QLabel {{ background: transparent; }}
+#module_header_panel[is_active_tile="true"] {{ border-bottom: 1px solid {ACCENT_HIGHLIGHT_COLOR}; }}
+#module_library_bar, #module_picker_panel {{ background: transparent; }}
+#module_library_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
+#module_library_hint_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
+#add_module_btn {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
+#add_module_btn:hover {{ background: {ACCENT_HIGHLIGHT_COLOR}; }}
+#module_tile_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 2px; }}
+#module_tile_btn:hover {{ background: {HOVER_COLOR}; }}
+#module_body_panel {{ background: transparent; }}
+#empty_module_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
+/* Tensor inspector module (plots draw their own colors from this palette) */
+#tensor_inspector_panel, #inspector_controls_panel {{ background: transparent; }}
+#inspector_control_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; min-width: 34px; }}
+#inspector_stats_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
+#scatter_unavailable_label {{ color: {MUTED_TEXT_COLOR}; background: {BACKGROUND_COLOR}; }}
+#live_toggle_btn {{ background: {HEADER_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: {CORNER_RADIUS_PX}px; padding: 2px 8px; }}
+#live_toggle_btn:hover {{ background: {HOVER_COLOR}; }}
+#live_toggle_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
+/* RF imaging inspector */
+#rf_inspector_panel, #rf_controls_panel, #wave_sim_panel {{ background: transparent; }}
+#rf_source_label, #rf_stats_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
+#rf_material_summary_label {{ color: {TEXT_COLOR}; font-size: 11px; background: transparent; padding: 4px; }}
+"""
+# --- END [3.8] ---
+
+# ==============================================================================
+# [3.9] button_qss
 # ==============================================================================
 BUTTON_QSS = f"""
 /* ---------- Buttons ---------- */
@@ -237,10 +352,10 @@ QPushButton:pressed {{ background: {BORDER_COLOR}; }}
 QPushButton:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
 QPushButton:disabled {{ color: {MUTED_TEXT_COLOR}; }}
 """
-# --- END [3.8] ---
+# --- END [3.9] ---
 
 # ==============================================================================
-# [3.9] input_qss
+# [3.10] input_qss
 # ==============================================================================
 INPUT_QSS = f"""
 /* ---------- Text inputs, spin boxes, combo boxes ---------- */
@@ -264,10 +379,10 @@ QComboBox QAbstractItemView {{
 
 QCheckBox, QRadioButton {{ background: transparent; spacing: 6px; }}
 """
-# --- END [3.9] ---
+# --- END [3.10] ---
 
 # ==============================================================================
-# [3.10] item_view_qss
+# [3.11] item_view_qss
 # ==============================================================================
 ITEM_VIEW_QSS = f"""
 /* ---------- Tables, trees, lists ---------- */
@@ -293,10 +408,10 @@ QHeaderView::section {{
 }}
 QTableCornerButton::section {{ background: {HEADER_COLOR}; border: none; }}
 """
-# --- END [3.10] ---
+# --- END [3.11] ---
 
 # ==============================================================================
-# [3.11] group_box_qss
+# [3.12] group_box_qss
 # ==============================================================================
 GROUP_BOX_QSS = f"""
 /* ---------- Group boxes (panel with a title) ---------- */
@@ -315,10 +430,10 @@ QGroupBox::title {{
     font-weight: 600;
 }}
 """
-# --- END [3.11] ---
+# --- END [3.12] ---
 
 # ==============================================================================
-# [3.12] tab_qss
+# [3.13] tab_qss
 # ==============================================================================
 TAB_QSS = f"""
 /* ---------- Tabs ---------- */
@@ -334,10 +449,10 @@ QTabBar::tab {{
 QTabBar::tab:selected {{ background: {PANEL_COLOR}; color: {TEXT_COLOR}; border-top: 2px solid {ACCENT_HIGHLIGHT_COLOR}; }}
 QTabBar::tab:hover:!selected {{ background: {HOVER_COLOR}; }}
 """
-# --- END [3.12] ---
+# --- END [3.13] ---
 
 # ==============================================================================
-# [3.13] dock_qss
+# [3.14] dock_qss
 # ==============================================================================
 DOCK_QSS = f"""
 /* ---------- Dock widgets (Unity-style panels) ---------- */
@@ -349,10 +464,10 @@ QDockWidget::title {{
 QMainWindow::separator {{ background: {BORDER_COLOR}; width: 3px; height: 3px; }}
 QMainWindow::separator:hover {{ background: {ACCENT_COLOR}; }}
 """
-# --- END [3.13] ---
+# --- END [3.14] ---
 
 # ==============================================================================
-# [3.14] progress_bar_qss
+# [3.15] progress_bar_qss
 # ==============================================================================
 PROGRESS_BAR_QSS = f"""
 /* ---------- Progress bars ---------- */
@@ -364,10 +479,10 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {ACCENT_HIGHLIGHT_COLOR}; }}
 """
-# --- END [3.14] ---
+# --- END [3.15] ---
 
 # ==============================================================================
-# [3.15] scroll_bar_qss
+# [3.16] scroll_bar_qss
 # ==============================================================================
 SCROLL_BAR_QSS = f"""
 /* ---------- Scroll bars (thin, flat) ---------- */
@@ -378,16 +493,16 @@ QScrollBar::handle:hover {{ background: {SCROLLBAR_HOVER_COLOR}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 """
-# --- END [3.15] ---
+# --- END [3.16] ---
 
 # ==============================================================================
-# [3.16] tooltip_qss
+# [3.17] tooltip_qss
 # ==============================================================================
 TOOLTIP_QSS = f"""
 /* ---------- Tooltips ---------- */
 QToolTip {{ background: {PANEL_COLOR}; color: {TEXT_COLOR}; border: 1px solid {EDGE_COLOR}; padding: 3px; }}
 """
-# --- END [3.16] ---
+# --- END [3.17] ---
 
 
 # ==============================================================================
@@ -398,10 +513,11 @@ STYLESHEET = "".join([
     BASE_QSS,
     MENU_AND_STATUS_QSS,
     SIDEBAR_QSS,
-    TOP_BAR_QSS,
+    TAB_AREA_QSS,
     SPLITTER_QSS,
     PAGE_HEADING_QSS,
     STAT_CARD_QSS,
+    MODULE_QSS,
     BUTTON_QSS,
     INPUT_QSS,
     ITEM_VIEW_QSS,
