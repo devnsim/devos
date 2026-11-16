@@ -6,16 +6,22 @@
 #   2. Links the app to its desktop launcher so the taskbar shows the right icon.
 #   3. Applies the global theme (colors and styles) from theme.py.
 #   4. Opens the main window and keeps the app running until it is closed.
+#   5. Starts the activity log session: hooks for unhandled errors and Qt warnings, start-up steps,
+#      database attached for saving, session ended (and flushed) on quit.
 #   Run from the project root with:  python -m app.main
 # CONTRACT:
-#   - Requires: app.ui.main_window.MainWindow, app.ui.theme.STYLESHEET,
+#   - Requires: app.ui.main_window.MainWindow, app.ui.theme.STYLESHEET, app.data.activity_log, app.native,
 #               assets/devos.svg, devos.desktop (created by the install script)
 #   - Exposes: main() -> int (process exit code)
 # NOTES:
+#   - [2026-11-16] Shuts Qt WebEngine down in order after the event loop (no segfault on quit).
+#   - [2026-11-16] prepare_web_engine() runs before QApplication so browser pages (Qt WebEngine) work.
 #   - [2026-11-14] Reformatted to the file standard; ICON renamed to APP_ICON_PATH,
 #                  window renamed to main_window, magic strings moved to constants.
 #   - [2026-11-14] Added window icon and setDesktopFileName for the Wayland taskbar icon.
 #   - [2026-11-14] main() prints a warning if APP_ICON_PATH is missing instead of failing silently.
+#   - [2026-11-15] Activity log session: start-up announcements, error / Qt-warning hooks, end_session().
+#                  App modules are imported after the log starts so their start-up is logged too.
 # ==============================================================================
 
 # ==============================================================================
@@ -44,11 +50,11 @@
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from app.ui.main_window import MainWindow
-from app.ui.theme import STYLESHEET
+from app.data.activity_log import get_activity_log
 # --- END [1.1] ---
 
 # ==============================================================================
@@ -62,23 +68,52 @@ APP_ICON_PATH = Path(__file__).parent.parent / "assets" / "devos.svg"
 # ==============================================================================
 # [2.1] main
 # ==============================================================================
+def _qt_message_handler(message_type, context, message: str) -> None:
+    """Qt's own warnings go to the activity log instead of disappearing in a terminal."""
+    if message_type in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+        level = "warning" if message_type == QtMsgType.QtWarningMsg else "error"
+        getattr(get_activity_log(), level)("qt", message)
+
+
 def main() -> int:
+    log = get_activity_log()
+    log.install_hooks()                              # unhandled errors -> System Log
+    qInstallMessageHandler(_qt_message_handler)
+    log.info("devos", f"DevOS starting (Python {sys.version.split()[0]})")
+
+    from app.ui.web_support import prepare_web_engine, shutdown_web_engine
+    prepare_web_engine()                             # before QApplication (browser pages)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    log.info("devos", f"Qt {__import__('PySide6').__version__} on the '{app.platformName()}' display platform")
     if not APP_ICON_PATH.exists():
-        print(f"[DevOS] app icon not found: {APP_ICON_PATH}")
+        log.warning("devos", f"App icon not found: {APP_ICON_PATH}")
     app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     app.setDesktopFileName(DESKTOP_FILE_ID)
     # Note:
     # - This setDesktopFileName connects the window to devos.desktop on Wayland
     # - On Plasma’s Wayland session, the setDesktopFileName line is what makes the taskbar show your icon instead of a generic one.
 
-    app.setStyleSheet(STYLESHEET)
+    from app.data.store.database import get_database       # after the log, so opening it is logged
+    from app.ui.main_window import MainWindow
+    from app.ui.theme import STYLESHEET
+    from app import native
+    log.attach_database(get_database())
+    if native.HAS_NATIVE:
+        log.success("engine", f"Native engine loaded: {native.ENGINE_NAME}")
+    else:
+        log.warning("engine", "Native C++ engine not built; using the NumPy fallback (slower). Run: python -m app.native.build")
 
-    main_window = MainWindow()
+    app.setStyleSheet(STYLESHEET)
+    with log.step("devos", "Build main window"):
+        main_window = MainWindow()
     main_window.show()
+    log.success("devos", "Ready")
 
     exit_code = app.exec()
+    main_window.close()
+    shutdown_web_engine()                  # pages before profiles, or Qt WebEngine crashes on exit
+    log.end_session()
     return exit_code
 # --- END [2.1] ---
 

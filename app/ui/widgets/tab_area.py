@@ -10,11 +10,19 @@
 # CONTRACT:
 #   - Requires: app.ui.widgets.tab_group (TabGroup, NO_PAGE_INDEX, DROP_ZONE_TABS),
 #               app.ui.widgets.tiling_layout (drop zones, insert_beside, normalize_tree, first_leaf, new_splitter),
+#               app.ui.window_events.mouse_hub,
 #               QSS selectors #tab_area_panel, #pane_splitter in app/ui/theme.py
-#   - Exposes: TabArea (QWidget) with signal current_page_changed(int); open_page(page_index);
+#   - Exposes: TabArea(page_provider) (QWidget) with signals current_page_changed(int),
+#              create_page_requested(object TabGroup), rename_requested(int); open_page(page_index);
+#              open_page_in(tab_group, page_index); set_page_title(); set_page_icon(); replace_page_widget();
+#              forget_page(); PageProvider;
 #              close_page(page_index); close_current_tab(); split_pane(tab_group, drop_zone);
-#              close_pane(tab_group); add_leading_widget(widget); NO_PAGE_INDEX
+#              close_pane(tab_group); add_leading_widget(widget); add_trailing_widget(widget); NO_PAGE_INDEX
 # NOTES:
+#   - [2026-11-16] Active pane follows mouse presses via window_events.mouse_hub() instead of an event
+#                  filter on the QApplication (PySide crashed on Qt WebEngine's internal objects).
+#   - [2026-11-16] Ctrl+T = new page in the active pane (the tab row's +); set_page_icon() and
+#                  replace_page_widget() for pages that change kind (canvas -> browser).
 #   - [2026-11-15] Created as a single tab row (Obsidian-style tabs).
 #   - [2026-11-15] Became a multi-pane workspace: the tab row moved into TabGroup (tab_group.py);
 #                  TabArea now owns the panes, the seams between them and every page move.
@@ -23,6 +31,8 @@
 #                  parked_pages_panel.
 #   - [2026-11-15] Panes now tile as a tree of QSplitters (rows and columns, any depth).
 #                  _normalize_layout() keeps the tree minimal after every close.
+#   - [2026-11-15] Pages come from a PageProvider (title, icon, widget created on first open) instead
+#                  of a fixed list, because pages are user data now. page_index = the page's id.
 #   - [2026-11-15] Splitter-tree operations moved to tiling_layout.py (shared with ModuleCanvas);
 #                  EDGE_SPLITS [2.2] and the bodies of [3.6]/[3.7] now call it.
 # ==============================================================================
@@ -35,10 +45,10 @@
 # - layout tree: root_splitter and the splitters inside it are branches; TabGroups are leaves.
 #   A splitter's orientation says whether its children sit side by side or top to bottom.
 # - leading widget: A widget placed at the far left of the top-left pane's tab row (open-sidebar button).
+# - trailing widget: A widget at the far right of the top-right pane's tab row (window controls).
 # - NO_PAGE_INDEX (int): Sent by current_page_changed when the active pane has no tab (value: -1).
-# - page_entries (list[tuple[str, str, QWidget]]): One entry per page, same order as
-#   MainWindow.page_entries: {tab title, icon file name, page widget}.
-# - page_index (int): Position of a page in page_entries.
+# - page provider: Object answering page_title(id), page_icon(id), page_widget(id) (see PageProvider).
+# - page_index (int): A page's id (user pages: database id; system pages: small reserved numbers).
 # - pane: One TabGroup (a leaf of the layout tree).
 # - parked_pages_panel (QWidget): Hidden holder for pages that have no tab, so they are never deleted.
 # - root_splitter (QSplitter): Top of the layout tree; never removed.
@@ -92,46 +102,55 @@ Rules:
 # ==============================================================================
 # [2.1] imports
 # ==============================================================================
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from typing import Protocol
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from app.ui.widgets.tab_group import DROP_ZONE_TABS, NO_PAGE_INDEX, TabGroup
+from app.ui.window_events import mouse_hub
 from app.ui.widgets.tiling_layout import (
-    DROP_ZONE_RIGHT, EDGE_DROP_ZONES, first_leaf, insert_beside, new_splitter, normalize_tree,
+    DROP_ZONE_RIGHT, EDGE_DROP_ZONES, first_leaf, insert_beside, new_splitter, normalize_tree, top_right_leaf,
 )
 # --- END [2.1] ---
 
 # ==============================================================================
 # [3.1] class_signals_and_constants
 # ==============================================================================
+class PageProvider(Protocol):
+    def page_title(self, page_index: int) -> str: ...
+    def page_icon(self, page_index: int) -> str: ...
+    def page_widget(self, page_index: int) -> QWidget: ...
+
+
 class TabArea(QWidget):
     current_page_changed = Signal(int)   # page_index shown in the active pane, or NO_PAGE_INDEX
+    create_page_requested = Signal(object)   # TabGroup whose "Create New Page" was clicked
+    rename_requested = Signal(int)           # page_index (tab context menu)
 
     NO_PAGE_INDEX = NO_PAGE_INDEX
     SEAM_WIDTH_PX = 4
-    SINGLE_PANE_HINT = "Pick a page from the sidebar"
-    SPLIT_PANE_HINT = "Drag a page here"
+    SINGLE_PANE_HINT = "or pick a page from the sidebar"
+    SPLIT_PANE_HINT = "or drag a tab here"
 # --- END [3.1] ---
 
 # ==============================================================================
 # [3.2] init_tab_area
 # ==============================================================================
-    def __init__(self, page_entries: list[tuple[str, str, QWidget]], parent: QWidget | None = None) -> None:
-        """page_entries: list of (tab title, icon file name, page widget)."""
+    def __init__(self, page_provider: PageProvider, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("tab_area_panel")
-        self.page_entries = page_entries
+        self.page_provider = page_provider
         self.tab_groups: list[TabGroup] = []
         self.active_tab_group: TabGroup | None = None
         self.leading_widgets: list[QWidget] = []
+        self.trailing_widgets: list[QWidget] = []
         self._is_dragging_tab = False
 
         # --- Pages without a tab wait here (hidden), so closing a pane never deletes them ---
         self.parked_pages_panel = QWidget(self)
         self.parked_pages_panel.hide()
-        for _title, _icon_file, page_widget in self.page_entries:
-            page_widget.setParent(self.parked_pages_panel)
 
         # --- Layout tree: starts as one splitter holding one pane ---
         self.root_splitter = new_splitter(Qt.Orientation.Horizontal, self.SEAM_WIDTH_PX)
@@ -146,7 +165,7 @@ class TabArea(QWidget):
 
         self._build_shortcuts()
         # A click anywhere inside a pane makes it the active pane, see [3.9].
-        QApplication.instance().installEventFilter(self)
+        mouse_hub().pressed.connect(self._on_mouse_pressed)
 # --- END [3.2] ---
 
 # ==============================================================================
@@ -156,6 +175,7 @@ class TabArea(QWidget):
         # --- Keyboard: work anywhere in the main window, on the active pane ---
         shortcut_actions = [
             ("Ctrl+W", self.close_current_tab),
+            ("Ctrl+T", lambda: self.create_page_requested.emit(self.active_tab_group)),
             ("Ctrl+Tab", lambda: self.active_tab_group.step_tab(1)),
             ("Ctrl+Shift+Tab", lambda: self.active_tab_group.step_tab(-1)),
         ]
@@ -184,6 +204,43 @@ class TabArea(QWidget):
             return
         self._park(owner_tab_group.remove_page(page_index))
         self._schedule_prune()
+
+    def open_page_in(self, tab_group: TabGroup, page_index: int) -> None:
+        """Open a page in a specific pane (moving its tab there if it is open elsewhere)."""
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is tab_group:
+            self._set_active_tab_group(tab_group)
+            tab_group.select_page(page_index)
+            return
+        if owner_tab_group is not None:
+            owner_tab_group.remove_page(page_index)
+        self._add_page_to(tab_group, page_index, insert_index=-1)
+        self._schedule_prune()
+
+    def set_page_title(self, page_index: int, title: str) -> None:
+        """A page was renamed: update its tab (wherever it is)."""
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is not None:
+            owner_tab_group.set_page_title(page_index, title)
+
+    def set_page_icon(self, page_index: int, icon_file_name: str) -> None:
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is not None:
+            owner_tab_group.set_page_icon(page_index, icon_file_name)
+
+    def replace_page_widget(self, page_index: int, page_widget: QWidget) -> QWidget | None:
+        """Swap the widget shown for a page (open or parked); returns the old widget for disposal."""
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is not None:
+            return owner_tab_group.replace_page_widget(page_index, page_widget)
+        return None
+
+    def forget_page(self, page_index: int) -> None:
+        """A page was deleted: close its tab. The caller disposes of the widget."""
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is not None:
+            owner_tab_group.remove_page(page_index)
+            self._schedule_prune()
 
     def close_current_tab(self) -> None:
         page_index = self.active_tab_group.current_page_index()
@@ -276,6 +333,8 @@ class TabArea(QWidget):
         tab_group.close_pane_requested.connect(lambda: self.close_pane(tab_group))
         tab_group.drag_started.connect(self._on_drag_started)
         tab_group.drag_finished.connect(self._on_drag_finished)
+        tab_group.create_page_requested.connect(lambda: self.create_page_requested.emit(tab_group))
+        tab_group.rename_requested.connect(self.rename_requested)
         self.tab_groups.append(tab_group)
         return tab_group
 
@@ -321,13 +380,15 @@ class TabArea(QWidget):
         if tab_group is self.active_tab_group:
             self.current_page_changed.emit(tab_group.current_page_index())
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+    def _on_mouse_pressed(self, widget: QWidget) -> None:
         """Any mouse press inside a pane makes it the active pane (the press still goes through)."""
-        if event.type() == QEvent.Type.MouseButtonPress and isinstance(watched, QWidget):
-            clicked_tab_group = self._tab_group_containing(watched)
-            if clicked_tab_group is not None and clicked_tab_group is not self.active_tab_group:
-                self._set_active_tab_group(clicked_tab_group)
-        return False
+        clicked_tab_group = self._tab_group_containing(widget)
+        if clicked_tab_group is not None and clicked_tab_group is not self.active_tab_group:
+            self._set_active_tab_group(clicked_tab_group)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        mouse_hub().watch(self)
 # --- END [3.9] ---
 
 # ==============================================================================
@@ -338,27 +399,38 @@ class TabArea(QWidget):
         self.leading_widgets.append(widget)
         self._place_leading_widgets()
 
+    def add_trailing_widget(self, widget: QWidget) -> None:
+        """Place a widget at the far right of the top-right pane's tab row (e.g. the window controls)."""
+        self.trailing_widgets.append(widget)
+        self._place_leading_widgets()
+
     def _place_leading_widgets(self) -> None:
-        # Leading widgets always sit in the top-left pane; move them if that pane changed.
-        top_left_tab_group = self._top_left_tab_group()
-        if top_left_tab_group is None:
-            return
-        for widget in reversed(self.leading_widgets):
-            if widget.parentWidget() is top_left_tab_group.tab_bar_panel:
+        # Leading widgets sit in the top-left pane, trailing ones in the top-right pane; follow those
+        # corners when panes split, move or close.
+        corners = ((self._top_left_tab_group(), reversed(self.leading_widgets), "add_leading_widget"),
+                   (top_right_leaf(self.root_splitter), self.trailing_widgets, "add_trailing_widget"))
+        for tab_group, widgets, add_method in corners:
+            if tab_group is None:
                 continue
-            was_hidden = widget.isHidden()
-            widget.setParent(None)                         # leaves its old row
-            top_left_tab_group.add_leading_widget(widget)
-            widget.setVisible(not was_hidden)
+            for widget in widgets:
+                if widget.parentWidget() is tab_group.tab_bar_panel:
+                    continue
+                # Keep only an explicit hide() (e.g. the open-sidebar button while the sidebar is open);
+                # a brand-new parentless widget also reports isHidden(), but should appear.
+                was_hidden = widget.isHidden() and widget.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide)
+                widget.setParent(None)                     # leaves its old row
+                getattr(tab_group, add_method)(widget)
+                widget.setVisible(not was_hidden)
 
     def _top_left_tab_group(self) -> TabGroup | None:
         """First pane in the layout tree (always the top-left one)."""
         return first_leaf(self.root_splitter)
 
     def _add_page_to(self, tab_group: TabGroup, page_index: int, insert_index: int) -> None:
-        title_text, icon_file_name, page_widget = self.page_entries[page_index]
+        provider = self.page_provider
         tab_group.setProperty("was_used", True)
-        tab_group.add_page(page_index, title_text, icon_file_name, page_widget, insert_index)
+        tab_group.add_page(page_index, provider.page_title(page_index), provider.page_icon(page_index),
+                           provider.page_widget(page_index), insert_index)
         self._set_active_tab_group(tab_group)
 
     def _park(self, page_widget: QWidget | None) -> None:

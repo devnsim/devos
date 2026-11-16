@@ -7,25 +7,36 @@
 #   3. Accepts dropped tabs and reports where they landed (tab row, centre, or one of four edges);
 #      previews the landing spot while a tab hovers.
 #   4. Offers a "split" button (new pane to the right) and a "close pane" button.
+#   5. A "+" right after the last tab creates a new page (same as the sidebar's +).
 # CONTRACT:
 #   - Requires: app.ui.widgets.sidebar (ICON_SIZE, load_icon), app.ui.widgets.tiling_layout
 #               (drop zones, edge_zone_at, zone_preview_rect), assets/icons/tab_close.svg,
-#               assets/icons/split_pane.svg, QSS selectors #tab_group_panel, #tab_bar_panel,
-#               #page_tab_bar, #tab_close_btn, #split_pane_btn, #close_pane_btn, #empty_tab_label,
+#               assets/icons/split_pane.svg, assets/icons/plus.svg, QSS selectors #tab_group_panel, #tab_bar_panel,
+#               #page_tab_bar, #tab_close_btn, #new_tab_btn, #split_pane_btn, #close_pane_btn, #empty_tab_label,
 #               #drop_overlay_panel in app/ui/theme.py
 #   - Exposes: TabGroup (QWidget) with signals current_page_changed(int), tab_close_requested(int),
 #              page_dropped(int, str, int), split_requested(), close_pane_requested(), drag_started(),
 #              drag_finished(); add_page(); remove_page(); select_page(); has_page(); page_indices();
 #              current_page_index(); step_tab(); tab_count(); set_empty_hint(); set_is_active();
-#              set_can_close_pane(); add_leading_widget(); PageTabBar; PAGE_MIME_TYPE; NO_PAGE_INDEX;
+#              set_can_close_pane(); add_leading_widget(); add_trailing_widget(); set_page_title(); set_page_icon();
+#              replace_page_widget();
+#              signals create_page_requested(), rename_requested(int); PageTabBar; PAGE_MIME_TYPE; NO_PAGE_INDEX;
 #              DROP_ZONE_* and EDGE_DROP_ZONES
 # NOTES:
+#   - [2026-11-16] "+" (new_tab_btn) sits right after the last tab and creates a new page
+#                  (create_page_requested, like the sidebar's +); the tab bar no longer stretches, so the +
+#                  follows the tabs and the free space after it still drags the window.
+#                  set_page_icon() / replace_page_widget(): a page can change kind (canvas -> browser).
 #   - [2026-11-15] Created when TabArea became a multi-pane workspace. A TabGroup never decides
 #                  what happens to a page; it reports clicks, closes and drops, and TabArea acts.
 #   - [2026-11-15] Dragging a tab out of its row first ends Qt's own tab-move (fake release),
 #                  then starts a QDrag carrying only the page_index (PAGE_MIME_TYPE).
 #   - [2026-11-15] Drop zones: the outer EDGE_ZONE_FRACTION of the page area on each side means
 #                  "split here"; the overlay previews the half the new pane will take.
+#   - [2026-11-15] Empty panes show a "Create New Page" button (create_page_requested); tabs have a
+#                  context menu (Rename page / Close tab) and double-click renames (rename_requested).
+#   - [2026-11-15] Tab row is TITLE_BAR_HEIGHT_PX tall and marked as title-bar space: in a frameless
+#                  window, empty space in a top tab row drags the window (title_bar.py).
 #   - [2026-11-15] Edge-zone maths and the edge DROP_ZONE_* constants moved to tiling_layout.py
 #                  (re-exported here); only DROP_ZONE_TABS is specific to tab panes.
 # ==============================================================================
@@ -72,7 +83,7 @@
 """One pane of tabs.
 
 Layout:
-    [leading][ Home  x ][ Market Lab  x ]          [split][close pane]   <- tab row
+    [leading][ Home  x ][ Market Lab  x ][+]       [split][close pane]   <- tab row
     +----------------------------------------------------------------+
     |  page of the selected tab, or a hint when the pane is empty     |
     +----------------------------------------------------------------+
@@ -95,10 +106,13 @@ Dragging:
 from PySide6.QtCore import QByteArray, QEvent, QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag, QMouseEvent
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QMenu, QPushButton, QStackedWidget, QTabBar, QToolButton, QVBoxLayout, QWidget,
 )
 
+from app.ui.theme import TITLE_BAR_HEIGHT_PX
+from app.ui.ui_tools import set_style_property
 from app.ui.widgets.sidebar import ICON_SIZE, load_icon
+from app.ui.widgets.title_bar import mark_title_bar_region
 from app.ui.widgets.tiling_layout import (  # noqa: F401  (edge zones re-exported for callers)
     DROP_ZONE_BOTTOM, DROP_ZONE_CENTER, DROP_ZONE_LEFT, DROP_ZONE_RIGHT, DROP_ZONE_TOP,
     EDGE_DROP_ZONES, EDGE_ZONE_FRACTION, edge_zone_at, zone_preview_rect,
@@ -124,6 +138,7 @@ class PageTabBar(QTabBar):
     """QTabBar that can drag a tab out to another pane, and closes tabs on middle-click."""
 
     tab_middle_clicked = Signal(int)    # tab_index
+    tab_double_clicked = Signal(int)    # tab_index
     drag_started = Signal()
     drag_finished = Signal()
 
@@ -151,6 +166,13 @@ class PageTabBar(QTabBar):
                 self._start_drag(event)
                 return
         super().mouseMoveEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        tab_index = self.tabAt(event.position().toPoint())
+        if event.button() == Qt.MouseButton.LeftButton and tab_index >= 0:
+            self.tab_double_clicked.emit(tab_index)
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._pressed_tab_index = -1
@@ -201,6 +223,8 @@ class TabGroup(QWidget):
     page_dropped = Signal(int, str, int) # page_index, drop zone, insert_index (-1 = after the current tab)
     split_requested = Signal()
     close_pane_requested = Signal()
+    create_page_requested = Signal()
+    rename_requested = Signal(int)       # page_index
     drag_started = Signal()
     drag_finished = Signal()
 
@@ -235,8 +259,10 @@ class TabGroup(QWidget):
         # --- Row: leading widgets, tabs, then the pane buttons on the right ---
         self.tab_bar_panel = QWidget(objectName="tab_bar_panel")
         self.tab_bar_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.tab_bar_panel.setFixedHeight(TITLE_BAR_HEIGHT_PX)
+        mark_title_bar_region(self.tab_bar_panel)         # empty space drags the window (top panes only)
         self.tab_row_layout = QHBoxLayout(self.tab_bar_panel)
-        self.tab_row_layout.setContentsMargins(4, 0, 4, 0)
+        self.tab_row_layout.setContentsMargins(4, 0, 0, 0)
         self.tab_row_layout.setSpacing(4)
 
         self.page_tab_bar = PageTabBar()
@@ -250,14 +276,23 @@ class TabGroup(QWidget):
         self.page_tab_bar.tab_middle_clicked.connect(self._request_close_at)
         self.page_tab_bar.drag_started.connect(self.drag_started)
         self.page_tab_bar.drag_finished.connect(self.drag_finished)
+        self.page_tab_bar.tab_double_clicked.connect(
+            lambda tab_index: self.rename_requested.emit(self.page_tab_bar.tabData(tab_index))
+        )
+        self.page_tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.page_tab_bar.customContextMenuRequested.connect(self._show_tab_menu)
 
+        self.new_tab_btn = self._build_row_btn("new_tab_btn", "plus.svg", "New page (Ctrl+T)")
+        self.new_tab_btn.clicked.connect(self.create_page_requested)
         self.split_pane_btn = self._build_row_btn("split_pane_btn", "split_pane.svg", "Split right")
         self.split_pane_btn.clicked.connect(self.split_requested)
         self.close_pane_btn = self._build_row_btn("close_pane_btn", "tab_close.svg", "Close this pane")
         self.close_pane_btn.clicked.connect(self.close_pane_requested)
         self.close_pane_btn.hide()                         # only shown while there are 2+ panes
 
-        self.tab_row_layout.addWidget(self.page_tab_bar, 1, Qt.AlignmentFlag.AlignBottom)
+        self.tab_row_layout.addWidget(self.page_tab_bar, 0, Qt.AlignmentFlag.AlignBottom)
+        self.tab_row_layout.addWidget(self.new_tab_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.tab_row_layout.addStretch(1)                  # free space: drags the window (title bar)
         self.tab_row_layout.addWidget(self.split_pane_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self.tab_row_layout.addWidget(self.close_pane_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self.tab_group_layout.addWidget(self.tab_bar_panel)
@@ -265,17 +300,30 @@ class TabGroup(QWidget):
     def add_leading_widget(self, widget: QWidget) -> None:
         """Place a widget at the far left of the tab row (e.g. the open-sidebar button)."""
         self.tab_row_layout.insertWidget(0, widget, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def add_trailing_widget(self, widget: QWidget) -> None:
+        """Place a widget at the far right of the tab row (e.g. the window controls)."""
+        self.tab_row_layout.addWidget(widget, 0, Qt.AlignmentFlag.AlignTop)
 # --- END [4.3] ---
 
 # ==============================================================================
 # [4.4] build_page_area
 # ==============================================================================
     def _build_page_area(self) -> None:
-        # --- Pages of this pane's tabs; index 0 is the empty-pane hint ---
+        # --- Pages of this pane's tabs; index 0 is the empty pane: a hint + "Create New Page" ---
         self.page_stack = QStackedWidget()
+        self.empty_pane_panel = QWidget(objectName="empty_pane_panel")
+        empty_layout = QVBoxLayout(self.empty_pane_panel)
+        empty_layout.addStretch()
+        self.create_page_btn = QPushButton("+  Create New Page", objectName="create_page_btn")
+        self.create_page_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.create_page_btn.clicked.connect(self.create_page_requested)
+        empty_layout.addWidget(self.create_page_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self.empty_tab_label = QLabel(objectName="empty_tab_label")
         self.empty_tab_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.page_stack.addWidget(self.empty_tab_label)
+        empty_layout.addWidget(self.empty_tab_label)
+        empty_layout.addStretch()
+        self.page_stack.addWidget(self.empty_pane_panel)
         self.tab_group_layout.addWidget(self.page_stack, 1)
 
         # --- Drop highlight: drawn over the page area while a tab hovers this pane ---
@@ -307,6 +355,18 @@ class TabGroup(QWidget):
         self.page_tab_bar.setTabButton(tab_index, QTabBar.ButtonPosition.RightSide, self._build_close_btn())
         self.page_tab_bar.blockSignals(False)
         self.select_page(page_index)
+
+    def replace_page_widget(self, page_index: int, page_widget: QWidget) -> QWidget | None:
+        """Show a different widget for a page's tab (same tab, same place); returns the old widget."""
+        old_widget = self._page_widgets.get(page_index)
+        if old_widget is None:
+            return None
+        self._page_widgets[page_index] = page_widget
+        self.page_stack.addWidget(page_widget)
+        if self.current_page_index() == page_index:
+            self.page_stack.setCurrentWidget(page_widget)
+        self.page_stack.removeWidget(old_widget)
+        return old_widget
 
     def remove_page(self, page_index: int) -> QWidget | None:
         """Remove a page's tab and return its widget (the caller decides where it goes next)."""
@@ -364,7 +424,7 @@ class TabGroup(QWidget):
 
     def set_is_active(self, is_active: bool) -> None:
         """Active pane: its selected tab gets an accent line (QSS property is_active_group)."""
-        self._set_style_property(self.page_tab_bar, "is_active_group", is_active)
+        set_style_property(self.page_tab_bar, "is_active_group", is_active)
 
     def set_can_close_pane(self, can_close_pane: bool) -> None:
         self.close_pane_btn.setVisible(can_close_pane)
@@ -453,6 +513,27 @@ class TabGroup(QWidget):
         if 0 <= tab_index < self.page_tab_bar.count():
             self.tab_close_requested.emit(self.page_tab_bar.tabData(tab_index))
 
+    def set_page_title(self, page_index: int, title: str) -> None:
+        tab_index = self._find_tab(page_index)
+        if tab_index is not None:
+            self.page_tab_bar.setTabText(tab_index, title)
+            self.page_tab_bar.setTabToolTip(tab_index, title)
+
+    def set_page_icon(self, page_index: int, icon_file_name: str) -> None:
+        tab_index = self._find_tab(page_index)
+        if tab_index is not None:
+            self.page_tab_bar.setTabIcon(tab_index, load_icon(icon_file_name))
+
+    def _show_tab_menu(self, position) -> None:
+        tab_index = self.page_tab_bar.tabAt(position)
+        if tab_index < 0:
+            return
+        page_index = self.page_tab_bar.tabData(tab_index)
+        menu = QMenu(self)
+        menu.addAction("Rename page").triggered.connect(lambda: self.rename_requested.emit(page_index))
+        menu.addAction("Close tab").triggered.connect(lambda: self.tab_close_requested.emit(page_index))
+        menu.exec(self.page_tab_bar.mapToGlobal(position))
+
     def _find_tab(self, page_index: int) -> int | None:
         for tab_index in range(self.page_tab_bar.count()):
             if self.page_tab_bar.tabData(tab_index) == page_index:
@@ -464,17 +545,9 @@ class TabGroup(QWidget):
 
     def _on_current_tab_changed(self, tab_index: int) -> None:
         if tab_index < 0 or self.page_tab_bar.count() == 0:
-            self.page_stack.setCurrentWidget(self.empty_tab_label)
+            self.page_stack.setCurrentWidget(self.empty_pane_panel)
             self.current_page_changed.emit(NO_PAGE_INDEX)
             return
         self.page_stack.setCurrentWidget(self._page_widget_at(tab_index))
         self.current_page_changed.emit(self.page_tab_bar.tabData(tab_index))
-
-    @staticmethod
-    def _set_style_property(widget: QWidget, property_name: str, value: bool) -> None:
-        """Set a QSS property and re-apply the stylesheet so the change shows."""
-        widget.setProperty(property_name, value)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-        widget.update()
 # --- END [4.8] ---

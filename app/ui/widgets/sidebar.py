@@ -1,122 +1,82 @@
 # ==============================================================================
 # FILE: app/ui/widgets/sidebar.py
-# OVERVIEW: The collapsible navigation sidebar: app title, close button and a list of apps.
+# OVERVIEW: The collapsible navigation sidebar: the user's pages and folders, favourites, settings.
 # PURPOSE:
-#   1. Shows the "DevOS" title and a button that asks the main window to close the sidebar.
-#   2. Shows section labels ("Home", "Workbenches") with clickable items (icon + name) under each.
-#   3. Tells the main window which app was clicked, and highlights the open one.
-#   4. Loads SVG icons from assets/icons/ for itself and for main_window.py.
+#   1. Header: "DevOS" title and a button that asks the main window to close the sidebar.
+#   2. Favorites: a reorderable list of pinned pages.
+#   3. All Pages: a tree of folders and pages - create (+ / folder+ buttons, context menus), rename
+#      (F2, double-click, context menu), delete, drag to reorder or move into folders.
+#   4. Footer: a settings button in the bottom-right corner.
+#   5. Loads SVG icons from assets/icons/ for itself and other widgets (load_icon).
 # CONTRACT:
-#   - Requires: SVG icons in assets/icons/ (sidebar_close.svg + one per app),
+#   - Requires: app.data.store.pages.PageStore, assets/icons (page, globe, folder, folder_open, plus,
+#               folder_plus, settings, sidebar_close .svg), app.ui.theme.TITLE_BAR_HEIGHT_PX,
 #               QSS selectors #nav_sidebar_panel, #sidebar_header_panel, #app_title_label,
-#               #sidebar_section_label, #sidebar_folder_btn, #sidebar_item_btn, #close_sidebar_btn
-#               in app/ui/theme.py
-#   - Exposes: Sidebar (QWidget) with signals page_selected(int), close_requested();
-#              select_page(page_index); clear_selection(); MIN/MAX/DEFAULT_WIDTH_PX; load_icon(icon_file_name);
-#              ICON_SIZE; ICONS_DIRECTORY
+#               #close_sidebar_btn, #sidebar_section_row, #sidebar_section_label, #sidebar_tool_btn,
+#               #sidebar_tree, #sidebar_footer_panel, #open_settings_btn
+#   - Exposes: Sidebar(page_store) (QWidget) with signals page_selected(int), page_created(int),
+#              page_renamed(int, str), page_deleted(int), settings_requested(), close_requested();
+#              refresh(); select_page(page_id); clear_selection(); create_page(folder_id=None);
+#              start_rename(page_id); MIN/MAX/DEFAULT_WIDTH_PX; load_icon(); ICON_SIZE; ICONS_DIRECTORY
 # NOTES:
-#   - [2026-11-14] Renamed to the standard: select() -> select_page(), *_WIDTH -> *_WIDTH_PX,
-#                  objectNames to snake_case; icon files sidebar-close/open.svg -> sidebar_close/open.svg.
-#   - [2026-11-14] All app items share objectName "sidebar_item_btn" (reusable-widget rule) so one
-#                  QSS selector styles every item.
+#   - [2026-11-16] Page icons come from the page kind (Page.icon: page.svg for canvases, globe.svg for browsers).
+#   - [2026-11-14] load_icon() returns an empty QIcon and prints a warning when a file is missing.
 #   - [2026-11-14] WA_StyledBackground is required: a QWidget *subclass* ignores its QSS background
 #                  without it.
-#   - [2026-11-14] load_icon() returns an empty QIcon and prints a warning when a file is missing,
-#                  instead of crashing.
-#   - [2026-11-15] Single "Menu" label replaced by per-item section titles: nav_items is now
-#                  (section_title, item_title, icon_file_name); a label is added when the section changes.
-#   - [2026-11-15] Added collapsible folders: nav_items is now (section_title, folder_title,
-#                  item_title, icon_file_name). Folders start collapsed; select_page() opens the folder
-#                  of the item it highlights. Nested items carry the QSS property is_nested=true.
-#   - [2026-11-15] Added clear_selection() so no item is highlighted while no tab is open.
-#   - [2026-11-15] Folders can nest: the folder field is now a folder_path. Rows carry the QSS
-#                  property nest_level (replaces is_nested); a row shows only if all its folders are open.
+#   - [2026-11-15] Rebuilt for user pages: fixed app list (sections "Home"/"Workbenches", button rows,
+#                  hand-made folders) replaced by Favorites + All Pages trees backed by PageStore.
+#                  Settings moved to a gear in the footer. Folder deletion never deletes pages.
+#   - [2026-11-15] Drag and drop uses QTreeWidget InternalMove (moves the item objects); after each drop
+#                  the whole arrangement is written back with PageStore.apply_tree().
 # ==============================================================================
 
 # ==============================================================================
 # [DEFINITIONS]
-# - DEFAULT_WIDTH_PX (int | px): Sidebar width at startup (default: 220).
-# - ICON_SIZE (QSize | px): Drawn size of every sidebar / top-bar icon (default: 16 x 16).
-# - ICONS_DIRECTORY (Path): devos/assets/icons/; parents[3] of this file is the project root.
-# - icon_file_name (str): SVG file name inside ICONS_DIRECTORY, e.g. "home.svg".
-# - MIN_WIDTH_PX / MAX_WIDTH_PX (int | px): Limits when dragging the seam (default: 160 / 400).
-# - folder_path (tuple[str, ...] | str): Folders an item sits in, outermost first, e.g.
-#   ("Finance", "Trading Dashboard"). A plain string means one folder; "" or () = directly under the section.
-# - folder_title (str): Name of one folder row, e.g. "Finance".
-# - nest_level (str): QSS property on every row: how many folders deep it is ("0", "1", "2", ...).
-# - FOLDER_CLOSED_ARROW / FOLDER_OPEN_ARROW (str): Arrow drawn before a folder's name ("▸" / "▾").
-# - nav_items (list[tuple]): One entry per app, in sidebar order:
-#   {section_title, folder_path, item_title, icon_file_name}. Items of one section, and of one
-#   folder, must be next to each other.
-# - section_title (str): Label shown above a group of items, e.g. "Home", "Workbenches".
-# - page_index (int): Position of an app in nav_items; same index as MainWindow.page_entries.
+# - item role data: (kind, id) on each tree item; kind is "page" or "folder".
+# - favourite: A page pinned to the Favorites list (it also stays in All Pages).
 # ==============================================================================
 
 # ==============================================================================
 # [INDEX]
-# 1. DESIGN_NOTES
-#    1.1 design_notes_docstring
-# 2. IMPORTS_AND_CONSTANTS
-#    2.1 imports
-#    2.2 icon_constants
-# 3. ICON_LOADING
-#    3.1 load_icon
-# 4. SIDEBAR
-#    4.1 class_signals_and_constants
-#    4.2 init_sidebar
-#    4.3 build_header
-#    4.4 build_nav_items
-#    4.5 select_page
-#    4.6 folders
+# 1. ICONS
+#    1.1 icon_constants
+#    1.2 load_icon
+# 2. PAGE_TREE
+#    2.1 page_tree
+# 3. SIDEBAR
+#    3.1 class_signals_and_constants
+#    3.2 init_and_layout
+#    3.3 refresh
+#    3.4 selection
+#    3.5 create_rename_delete
+#    3.6 tree_events
+#    3.7 context_menus
 # ==============================================================================
 
-# ==============================================================================
-# [1.1] design_notes_docstring
-# ==============================================================================
-"""Collapsible navigation sidebar.
-
-Layout:
-    [ DevOS                 [close] ]   <- header
-    Home                                <- section label
-    [icon] Home                         <- one button per application
-    [icon] Settings
-    Workbenches                         <- section label
-    ▸  Project Manager
-        [icon] Project Editor
-    ▾  Finance                          <- folder row: click to show/hide what's inside
-        ▾  Trading Dashboard            <- folders can nest
-            [icon] Overview             <- nested items (hidden while any folder above is closed)
-            [icon] Market Lab
-            ...
-
-Icons are SVG files in devos/assets/icons/. Change which icon an app uses
-in the `self.page_entries` list in main_window.py.
-"""
-# --- END [1.1] ---
-
-# ==============================================================================
-# [2.1] imports
-# ==============================================================================
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QButtonGroup, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QHBoxLayout, QLabel, QMenu, QMessageBox, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
-# --- END [2.1] ---
+
+from app.ui.theme import TITLE_BAR_HEIGHT_PX
 
 # ==============================================================================
-# [2.2] icon_constants
+# [1.1] icon_constants
 # ==============================================================================
 # This file is devos/app/ui/widgets/sidebar.py -> parents[3] is devos/
 ICONS_DIRECTORY = Path(__file__).resolve().parents[3] / "assets" / "icons"
 ICON_SIZE = QSize(16, 16)
-# --- END [2.2] ---
+ITEM_ROLE = Qt.ItemDataRole.UserRole
+KIND_PAGE, KIND_FOLDER = "page", "folder"
+# --- END [1.1] ---
 
 
 # ==============================================================================
-# [3.1] load_icon
+# [1.2] load_icon
 # ==============================================================================
 def load_icon(icon_file_name: str) -> QIcon:
     """Load an icon from assets/icons/. Missing files give an empty icon instead of crashing."""
@@ -125,195 +85,395 @@ def load_icon(icon_file_name: str) -> QIcon:
         print(f"[DevOS] icon not found: {icon_file_path}")
         return QIcon()
     return QIcon(str(icon_file_path))
-# --- END [3.1] ---
+# --- END [1.2] ---
 
 
 # ==============================================================================
-# [4.1] class_signals_and_constants
+# [2.1] page_tree
+# ==============================================================================
+class PageTree(QTreeWidget):
+    """Tree of pages (and folders) with internal drag-and-drop; emits items_moved after a drop."""
+
+    items_moved = Signal()
+
+    def __init__(self, has_folders: bool) -> None:
+        super().__init__(objectName="sidebar_tree")
+        self.setHeaderHidden(True)
+        self.setRootIsDecorated(has_folders)
+        self.setIndentation(14 if has_folders else 0)
+        self.setIconSize(ICON_SIZE)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)     # F2; double-click handled below
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setExpandsOnDoubleClick(False)
+        self.setAnimated(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.items_moved.emit()
+
+    @staticmethod
+    def item_key(item: QTreeWidgetItem | None) -> tuple[str, int] | None:
+        return None if item is None else item.data(0, ITEM_ROLE)
+
+    def find_item(self, kind: str, item_id: int) -> QTreeWidgetItem | None:
+        stack = [self.invisibleRootItem()]
+        while stack:
+            parent = stack.pop()
+            for index in range(parent.childCount()):
+                child = parent.child(index)
+                if child.data(0, ITEM_ROLE) == (kind, item_id):
+                    return child
+                stack.append(child)
+        return None
+# --- END [2.1] ---
+
+
+# ==============================================================================
+# [3.1] class_signals_and_constants
 # ==============================================================================
 class Sidebar(QWidget):
-    page_selected = Signal(int)     # emitted with the index of the clicked app
-    close_requested = Signal()      # emitted when the close button is pressed
+    page_selected = Signal(int)          # page id clicked
+    page_created = Signal(int)           # new page (from + / menus); the main window opens it
+    page_renamed = Signal(int, str)      # page id, stored title
+    page_deleted = Signal(int)
+    settings_requested = Signal()
+    close_requested = Signal()
 
-    MIN_WIDTH_PX = 160              # drag limits for the seam
+    MIN_WIDTH_PX = 160                   # drag limits for the seam
     MAX_WIDTH_PX = 400
     DEFAULT_WIDTH_PX = 220
-
-    ITEM_SPACING_PX = 1
-    BOTTOM_MARGIN_PX = 8
-
-    FOLDER_CLOSED_ARROW = "▸"
-    FOLDER_OPEN_ARROW = "▾"
-# --- END [4.1] ---
+    FAVORITES_MAX_ROWS = 8
+# --- END [3.1] ---
 
 # ==============================================================================
-# [4.2] init_sidebar
+# [3.2] init_and_layout
 # ==============================================================================
-    def __init__(self, nav_items: list[tuple], parent: QWidget | None = None) -> None:
-        """nav_items: list of (section title, folder path, item title, icon file name)."""
+    def __init__(self, page_store, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("nav_sidebar_panel")
-        # Needed so a QWidget *subclass* paints its stylesheet background
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(self.MIN_WIDTH_PX)
         self.setMaximumWidth(self.MAX_WIDTH_PX)
+        self.page_store = page_store
+        self._is_refreshing = False
 
         self.sidebar_layout = QVBoxLayout(self)
-        self.sidebar_layout.setContentsMargins(0, 0, 0, self.BOTTOM_MARGIN_PX)
-        self.sidebar_layout.setSpacing(self.ITEM_SPACING_PX)
-
+        self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_layout.setSpacing(0)
         self._build_header()
-        self._build_nav_items(nav_items)
-# --- END [4.2] ---
 
-# ==============================================================================
-# [4.3] build_header
-# ==============================================================================
+        self.sidebar_layout.addWidget(self._section_row("Favorites"))
+        self.favorites_tree = PageTree(has_folders=False)
+        self.sidebar_layout.addWidget(self.favorites_tree)
+
+        self.new_page_btn = self._tool_btn("plus.svg", "New page")
+        self.new_page_btn.clicked.connect(lambda: self.create_page(self._selected_folder_id()))
+        self.new_folder_btn = self._tool_btn("folder_plus.svg", "New folder")
+        self.new_folder_btn.clicked.connect(lambda: self.create_folder(self._selected_folder_id()))
+        self.sidebar_layout.addWidget(self._section_row("All Pages", [self.new_page_btn, self.new_folder_btn]))
+        self.pages_tree = PageTree(has_folders=True)
+        self.sidebar_layout.addWidget(self.pages_tree, 1)
+
+        self._build_footer()
+        for tree in (self.favorites_tree, self.pages_tree):
+            tree.itemClicked.connect(self._on_item_clicked)
+            tree.itemDoubleClicked.connect(lambda item, _column, tree=tree: tree.editItem(item, 0))
+            tree.itemChanged.connect(self._on_item_changed)
+            tree.customContextMenuRequested.connect(lambda position, tree=tree: self._show_context_menu(tree, position))
+        self.pages_tree.items_moved.connect(self._save_tree_arrangement)
+        self.favorites_tree.items_moved.connect(self._save_favorite_order)
+        self.pages_tree.itemExpanded.connect(lambda item: self._on_folder_expanded(item, True))
+        self.pages_tree.itemCollapsed.connect(lambda item: self._on_folder_expanded(item, False))
+        self.refresh()
+
     def _build_header(self) -> None:
-        # --- Header: app name + close button ---
+        # --- Header: app name + close button (part of the integrated title bar) ---
         self.sidebar_header_panel = QWidget(objectName="sidebar_header_panel")
+        self.sidebar_header_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.sidebar_header_panel.setFixedHeight(TITLE_BAR_HEIGHT_PX)   # lines up with the tab rows
         header_layout = QHBoxLayout(self.sidebar_header_panel)
-        header_layout.setContentsMargins(12, 6, 6, 6)
-
+        header_layout.setContentsMargins(12, 0, 6, 0)
         self.app_title_label = QLabel("DevOS", objectName="app_title_label")
         header_layout.addWidget(self.app_title_label)
         header_layout.addStretch()
-
-        self.close_sidebar_btn = QToolButton(objectName="close_sidebar_btn")
+        self.close_sidebar_btn = QToolButton(objectName="close_sidebar_btn", toolTip="Close sidebar", autoRaise=True)
         self.close_sidebar_btn.setIcon(load_icon("sidebar_close.svg"))
         self.close_sidebar_btn.setIconSize(ICON_SIZE)
-        self.close_sidebar_btn.setToolTip("Close sidebar")
-        self.close_sidebar_btn.setAutoRaise(True)
         self.close_sidebar_btn.clicked.connect(lambda: self.close_requested.emit())
         header_layout.addWidget(self.close_sidebar_btn)
-
         self.sidebar_layout.addWidget(self.sidebar_header_panel)
-# --- END [4.3] ---
+
+    def _section_row(self, title: str, buttons: list[QToolButton] = ()) -> QWidget:
+        row = QWidget(objectName="sidebar_section_row")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 6, 0)
+        layout.setSpacing(0)
+        layout.addWidget(QLabel(title, objectName="sidebar_section_label"))
+        layout.addStretch()
+        for button in buttons:
+            layout.addWidget(button)
+        return row
+
+    def _tool_btn(self, icon_file: str, tool_tip: str) -> QToolButton:
+        button = QToolButton(objectName="sidebar_tool_btn", toolTip=tool_tip, autoRaise=True)
+        button.setIcon(load_icon(icon_file))
+        button.setIconSize(QSize(14, 14))
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
+    def _build_footer(self) -> None:
+        self.sidebar_footer_panel = QWidget(objectName="sidebar_footer_panel")
+        footer_layout = QHBoxLayout(self.sidebar_footer_panel)
+        footer_layout.setContentsMargins(6, 4, 6, 6)
+        footer_layout.addStretch()
+        self.open_settings_btn = QToolButton(objectName="open_settings_btn", toolTip="Settings", autoRaise=True)
+        self.open_settings_btn.setIcon(load_icon("settings.svg"))
+        self.open_settings_btn.setIconSize(QSize(18, 18))
+        self.open_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_settings_btn.clicked.connect(self.settings_requested)
+        footer_layout.addWidget(self.open_settings_btn)
+        self.sidebar_layout.addWidget(self.sidebar_footer_panel)
+# --- END [3.2] ---
 
 # ==============================================================================
-# [4.4] build_nav_items
+# [3.3] refresh
 # ==============================================================================
-    def _build_nav_items(self, nav_items: list[tuple]) -> None:
-        # --- Sections, folders and items ---
-        # A section label starts whenever section_title changes. folder_path lists the folders an
-        # item sits in, outermost first; a folder row is added for every level that differs from
-        # the previous item's path. Every row remembers its parent folder for show/hide.
-        self.sidebar_section_labels: list[QLabel] = []
-        self.parent_folder_btns: dict[QPushButton, QPushButton | None] = {}   # row -> parent folder
-        self.page_folder_btns: dict[int, QPushButton] = {}                    # page_index -> folder
-        current_section_title = None
-        open_folder_btns: list[QPushButton] = []    # folder rows of the previous item, outermost first
+    def refresh(self) -> None:
+        """Rebuild both trees from the store (keeps the highlighted page)."""
+        selected = PageTree.item_key(self.pages_tree.currentItem())
+        self._is_refreshing = True
+        self.favorites_tree.clear()
+        self.pages_tree.clear()
+        page_flags = (Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
+                      | Qt.ItemFlag.ItemIsDragEnabled)
+        folder_flags = page_flags | Qt.ItemFlag.ItemIsDropEnabled
 
-        self.nav_item_group = QButtonGroup(self)
-        self.nav_item_group.setExclusive(True)
-        for page_index, (section_title, folder_path, item_title, icon_file_name) in enumerate(nav_items):
-            folder_path = self._as_folder_path(folder_path)
+        for page in self.page_store.favorites():
+            self._new_item(self.favorites_tree.invisibleRootItem(), page.title, (KIND_PAGE, page.page_id), page.icon, page_flags)
 
-            if section_title != current_section_title:
-                sidebar_section_label = QLabel(section_title, objectName="sidebar_section_label")
-                self.sidebar_section_labels.append(sidebar_section_label)
-                self.sidebar_layout.addWidget(sidebar_section_label)
-                current_section_title = section_title
-                open_folder_btns = []
+        folders, pages = self.page_store.folders(), self.page_store.pages()
+        folder_items: dict[int, QTreeWidgetItem] = {}
+        children: dict[int | None, list] = {}
+        for folder in folders:
+            children.setdefault(folder.parent_id, []).append((folder.sort_order, 0, folder))
+        for page in pages:
+            children.setdefault(page.folder_id, []).append((page.sort_order, 1, page))
 
-            # Keep the folder rows this item shares with the previous one; build the rest.
-            shared_depth = 0
-            while (
-                shared_depth < min(len(open_folder_btns), len(folder_path))
-                and open_folder_btns[shared_depth].property("folder_title") == folder_path[shared_depth]
-            ):
-                shared_depth += 1
-            open_folder_btns = open_folder_btns[:shared_depth]
-            for depth in range(shared_depth, len(folder_path)):
-                parent_folder_btn = open_folder_btns[-1] if open_folder_btns else None
-                open_folder_btns.append(self._build_folder_btn(folder_path[depth], depth, parent_folder_btn))
+        def add_children(parent_item: QTreeWidgetItem, parent_id: int | None) -> None:
+            for _order, kind_rank, entry in sorted(children.get(parent_id, []), key=lambda value: value[:2]):
+                if kind_rank == 0:
+                    item = self._new_item(parent_item, entry.name, (KIND_FOLDER, entry.folder_id), "folder.svg", folder_flags)
+                    folder_items[entry.folder_id] = item
+                    add_children(item, entry.folder_id)
+                    item.setExpanded(entry.is_expanded)
+                else:
+                    self._new_item(parent_item, entry.title, (KIND_PAGE, entry.page_id), entry.icon, page_flags)
 
-            sidebar_item_btn = QPushButton(item_title, objectName="sidebar_item_btn")
-            sidebar_item_btn.setCheckable(True)
-            sidebar_item_btn.setIcon(load_icon(icon_file_name))
-            sidebar_item_btn.setIconSize(ICON_SIZE)
-            sidebar_item_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            sidebar_item_btn.setProperty("nest_level", str(len(folder_path)))   # QSS indent
-            self.nav_item_group.addButton(sidebar_item_btn, page_index)
-            self.sidebar_layout.addWidget(sidebar_item_btn)
+        add_children(self.pages_tree.invisibleRootItem(), None)
+        self._fit_favorites_height()
+        self._is_refreshing = False
+        if selected is not None and selected[0] == KIND_PAGE:
+            self.select_page(selected[1])
 
-            parent_folder_btn = open_folder_btns[-1] if open_folder_btns else None
-            self.parent_folder_btns[sidebar_item_btn] = parent_folder_btn
-            if parent_folder_btn is not None:
-                self.page_folder_btns[page_index] = parent_folder_btn
+    def _new_item(self, parent: QTreeWidgetItem, text: str, key: tuple[str, int], icon_file: str, flags) -> QTreeWidgetItem:
+        item = QTreeWidgetItem(parent, [text])
+        item.setData(0, ITEM_ROLE, key)
+        item.setIcon(0, load_icon(icon_file))
+        item.setFlags(flags)
+        item.setToolTip(0, text)
+        return item
 
-        self.sidebar_layout.addStretch()
-        self.nav_item_group.idClicked.connect(lambda page_index: self.page_selected.emit(page_index))
-        self._refresh_row_visibility()               # folders start collapsed
-        if nav_items:
-            self.select_page(0)
-
-    @staticmethod
-    def _as_folder_path(folder_path) -> tuple[str, ...]:
-        """Accept "" (no folder), "Finance" (one folder) or ("Finance", "Trading Dashboard")."""
-        if isinstance(folder_path, str):
-            return (folder_path,) if folder_path else ()
-        return tuple(folder_path)
-# --- END [4.4] ---
+    def _fit_favorites_height(self) -> None:
+        rows = max(1, min(self.favorites_tree.topLevelItemCount(), self.FAVORITES_MAX_ROWS))
+        row_height = self.favorites_tree.sizeHintForRow(0) if self.favorites_tree.topLevelItemCount() else 26
+        self.favorites_tree.setFixedHeight(rows * max(row_height, 22) + 6)
+# --- END [3.3] ---
 
 # ==============================================================================
-# [4.5] select_page
+# [3.4] selection
 # ==============================================================================
-    def select_page(self, page_index: int) -> None:
-        """Highlight an item from code (does not emit page_selected). Opens its folders if closed."""
-        sidebar_item_btn = self.nav_item_group.button(page_index)
-        if sidebar_item_btn is None:
-            return
-        folder_btn = self.page_folder_btns.get(page_index)
-        while folder_btn is not None:
-            folder_btn.setChecked(True)
-            folder_btn = self.parent_folder_btns[folder_btn]
-        sidebar_item_btn.setChecked(True)
+    def select_page(self, page_id: int) -> None:
+        """Highlight a page in both trees (opening its folders)."""
+        for tree in (self.favorites_tree, self.pages_tree):
+            item = tree.find_item(KIND_PAGE, page_id)
+            tree.blockSignals(True)
+            if item is None:
+                tree.clearSelection()
+                tree.setCurrentItem(None)
+            else:
+                parent = item.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+                tree.setCurrentItem(item)
+                tree.scrollToItem(item)
+            tree.blockSignals(False)
 
     def clear_selection(self) -> None:
-        """Remove the highlight from every item (used when no tab is open)."""
-        self.nav_item_group.setExclusive(False)    # an exclusive group won't let the last item uncheck
-        for sidebar_item_btn in self.nav_item_group.buttons():
-            sidebar_item_btn.setChecked(False)
-        self.nav_item_group.setExclusive(True)
-# --- END [4.5] ---
+        for tree in (self.favorites_tree, self.pages_tree):
+            tree.clearSelection()
+            tree.setCurrentItem(None)
+
+    def _selected_folder_id(self) -> int | None:
+        """Folder for new items: the selected folder, or the folder of the selected page."""
+        item = self.pages_tree.currentItem()
+        if item is None or not item.isSelected():
+            return None
+        kind, item_id = item.data(0, ITEM_ROLE)
+        if kind == KIND_FOLDER:
+            return item_id
+        parent = item.parent()
+        return parent.data(0, ITEM_ROLE)[1] if parent is not None else None
+# --- END [3.4] ---
 
 # ==============================================================================
-# [4.6] folders
+# [3.5] create_rename_delete
 # ==============================================================================
-    def _build_folder_btn(
-        self, folder_title: str, depth: int, parent_folder_btn: QPushButton | None
-    ) -> QPushButton:
-        """Add a collapsible folder row. Checked = expanded. Starts collapsed."""
-        sidebar_folder_btn = QPushButton(objectName="sidebar_folder_btn")
-        sidebar_folder_btn.setProperty("folder_title", folder_title)
-        sidebar_folder_btn.setProperty("nest_level", str(depth))   # QSS indent
-        sidebar_folder_btn.setCheckable(True)
-        sidebar_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        sidebar_folder_btn.toggled.connect(lambda: self._on_folder_toggled(sidebar_folder_btn))
-        self.parent_folder_btns[sidebar_folder_btn] = parent_folder_btn
-        self.sidebar_layout.addWidget(sidebar_folder_btn)
-        self._update_folder_arrow(sidebar_folder_btn)
-        return sidebar_folder_btn
+    def create_page(self, folder_id: int | None = None) -> int:
+        page_id = self.page_store.create_page(folder_id=folder_id)
+        self.refresh()
+        self.select_page(page_id)
+        self.page_created.emit(page_id)
+        return page_id
 
-    def _on_folder_toggled(self, sidebar_folder_btn: QPushButton) -> None:
-        self._update_folder_arrow(sidebar_folder_btn)
-        self._refresh_row_visibility()
+    def create_folder(self, parent_id: int | None = None) -> int:
+        folder_id = self.page_store.create_folder(parent_id=parent_id)
+        self.refresh()
+        item = self.pages_tree.find_item(KIND_FOLDER, folder_id)
+        if item is not None:
+            self.pages_tree.setCurrentItem(item)
+            self.pages_tree.editItem(item, 0)          # name it straight away
+        return folder_id
 
-    def _update_folder_arrow(self, sidebar_folder_btn: QPushButton) -> None:
-        arrow_text = self.FOLDER_OPEN_ARROW if sidebar_folder_btn.isChecked() else self.FOLDER_CLOSED_ARROW
-        sidebar_folder_btn.setText(f"{arrow_text}  {sidebar_folder_btn.property('folder_title')}")
+    def start_rename(self, page_id: int) -> None:
+        item = self.pages_tree.find_item(KIND_PAGE, page_id)
+        if item is not None:
+            self.select_page(page_id)
+            self.pages_tree.editItem(item, 0)
 
-    def _refresh_row_visibility(self) -> None:
-        """A row shows only when every folder above it is expanded."""
-        for row_btn in self.parent_folder_btns:
-            row_btn.setVisible(self._are_parents_expanded(row_btn))
+    def set_page_title(self, page_id: int, title: str) -> None:
+        """Show a new title (renamed elsewhere, e.g. in the page heading)."""
+        self._is_refreshing = True
+        for tree in (self.favorites_tree, self.pages_tree):
+            item = tree.find_item(KIND_PAGE, page_id)
+            if item is not None:
+                item.setText(0, title)
+                item.setToolTip(0, title)
+        self._is_refreshing = False
 
-    def _are_parents_expanded(self, row_btn: QPushButton) -> bool:
-        parent_folder_btn = self.parent_folder_btns[row_btn]
-        while parent_folder_btn is not None:
-            if not parent_folder_btn.isChecked():
-                return False
-            parent_folder_btn = self.parent_folder_btns[parent_folder_btn]
-        return True
-# --- END [4.6] ---
+    def delete_page(self, page_id: int, ask: bool = True) -> None:
+        page = self.page_store.page(page_id)
+        if page is None:
+            return
+        if ask and QMessageBox.question(
+            self, "Delete page", f"Delete the page “{page.title}” and its layout?\nThis can't be undone.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.page_store.delete_page(page_id)
+        self.refresh()
+        self.page_deleted.emit(page_id)
+
+    def delete_folder(self, folder_id: int, ask: bool = True) -> None:
+        if ask and QMessageBox.question(
+            self, "Delete folder", "Delete this folder? Its pages and sub-folders move up a level.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.page_store.delete_folder(folder_id)
+        self.refresh()
+# --- END [3.5] ---
+
+# ==============================================================================
+# [3.6] tree_events
+# ==============================================================================
+    def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        kind, item_id = item.data(0, ITEM_ROLE)
+        if kind == KIND_PAGE:
+            self.page_selected.emit(item_id)
+        else:
+            item.setExpanded(not item.isExpanded())
+
+    def _on_item_changed(self, item: QTreeWidgetItem, _column: int) -> None:
+        if self._is_refreshing:
+            return
+        kind, item_id = item.data(0, ITEM_ROLE)
+        if kind == KIND_FOLDER:
+            name = self.page_store.rename_folder(item_id, item.text(0))
+            self._set_text_quietly(item, name)
+            return
+        page = self.page_store.page(item_id)
+        if page is None or page.title == item.text(0):
+            return
+        title = self.page_store.rename_page(item_id, item.text(0))
+        self.set_page_title(item_id, title)
+        self.page_renamed.emit(item_id, title)
+
+    def _set_text_quietly(self, item: QTreeWidgetItem, text: str) -> None:
+        self._is_refreshing = True
+        item.setText(0, text)
+        self._is_refreshing = False
+
+    def _on_folder_expanded(self, item: QTreeWidgetItem, is_expanded: bool) -> None:
+        if self._is_refreshing:
+            return
+        kind, item_id = item.data(0, ITEM_ROLE)
+        if kind == KIND_FOLDER:
+            item.setIcon(0, load_icon("folder_open.svg" if is_expanded else "folder.svg"))
+            self.page_store.set_folder_expanded(item_id, is_expanded)
+
+    def _save_tree_arrangement(self) -> None:
+        entries = []
+
+        def walk(parent_item: QTreeWidgetItem, parent_id: int | None) -> None:
+            for order in range(parent_item.childCount()):
+                child = parent_item.child(order)
+                kind, item_id = child.data(0, ITEM_ROLE)
+                entries.append((kind, item_id, parent_id, order))
+                if kind == KIND_FOLDER:
+                    walk(child, item_id)
+
+        walk(self.pages_tree.invisibleRootItem(), None)
+        self.page_store.apply_tree(entries)
+
+    def _save_favorite_order(self) -> None:
+        root = self.favorites_tree.invisibleRootItem()
+        self.page_store.apply_favorite_order([root.child(index).data(0, ITEM_ROLE)[1] for index in range(root.childCount())])
+# --- END [3.6] ---
+
+# ==============================================================================
+# [3.7] context_menus
+# ==============================================================================
+    def _show_context_menu(self, tree: PageTree, position) -> None:
+        item = tree.itemAt(position)
+        menu = QMenu(self)
+        key = PageTree.item_key(item)
+        if key is not None and key[0] == KIND_PAGE:
+            page_id = key[1]
+            page = self.page_store.page(page_id)
+            menu.addAction("Open").triggered.connect(lambda: self.page_selected.emit(page_id))
+            menu.addAction("Rename").triggered.connect(lambda: tree.editItem(item, 0))
+            if page is not None and page.is_favorite:
+                menu.addAction("Remove from Favorites").triggered.connect(lambda: self._set_favorite(page_id, False))
+            else:
+                menu.addAction("Add to Favorites").triggered.connect(lambda: self._set_favorite(page_id, True))
+            menu.addSeparator()
+            menu.addAction("Delete page…").triggered.connect(lambda: self.delete_page(page_id))
+        elif key is not None and key[0] == KIND_FOLDER:
+            folder_id = key[1]
+            menu.addAction("New page here").triggered.connect(lambda: self.create_page(folder_id))
+            menu.addAction("New folder here").triggered.connect(lambda: self.create_folder(folder_id))
+            menu.addAction("Rename").triggered.connect(lambda: tree.editItem(item, 0))
+            menu.addSeparator()
+            menu.addAction("Delete folder…").triggered.connect(lambda: self.delete_folder(folder_id))
+        else:
+            menu.addAction("New page").triggered.connect(lambda: self.create_page(None))
+            menu.addAction("New folder").triggered.connect(lambda: self.create_folder(None))
+        menu.exec(tree.viewport().mapToGlobal(position))
+
+    def _set_favorite(self, page_id: int, is_favorite: bool) -> None:
+        self.page_store.set_favorite(page_id, is_favorite)
+        self.refresh()
+# --- END [3.7] ---
