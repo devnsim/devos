@@ -16,7 +16,15 @@ let
     numpy       # n-dimensional arrays (Tensor4D)
     pyqtgraph   # fast plots: waterfall + 3D scatter (runs on PySide6)
     pyopengl    # OpenGL for pyqtgraph's 3D view
-    trimesh     # CAD mesh import (.stl / .obj) for the wave simulator
+    trimesh     # CAD mesh import (.stl / .obj) for the wave simulator and the CAD module
+    shapely     # 2D sketch geometry for CAD part design (extrude needs it)
+    mapbox-earcut  # polygon triangulation used by trimesh's extrude
+    manifold3d  # robust mesh booleans for CAD part design (pocket / hole / union)
+    networkx    # graph layouts for the graph database view
+    kuzu        # embedded graph database (Graph DB module)
+    openpyxl    # .xlsx read / write for the Spreadsheet module (LibreOffice handles .ods / .xls)
+    keyring     # system keyring for Comms account passwords (never stored in SQLite)
+    pytest      # tests/ (python -m pytest -q)
   ]);
 in
 pkgs.mkShell {
