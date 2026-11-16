@@ -4,19 +4,24 @@
 # PURPOSE:
 #   1. Opens (and creates) the database in the DevOS data folder, in WAL mode.
 #   2. Runs versioned migrations per namespace, so each module owns and evolves its own tables.
-#   3. Core tables: module_instances, module_settings (per-instance JSON key/values), canvas_layouts.
+#   3. Core tables: module_instances, module_settings (per-instance JSON key/values), canvas_layouts,
+#      user_preferences (app-wide get_preference / set_preference).
 #   4. Helpers to store NumPy arrays as BLOBs (np.save format) and JSON values.
 #   5. ModuleSettings: the small per-instance key/value store every module gets through its context.
 # CONTRACT:
 #   - Requires: sqlite3 (stdlib), numpy
-#   - Exposes: Database, get_database(), data_directory(), ModuleSettings, array_to_blob(), blob_to_array()
+#   - Exposes: Database (get_preference, set_preference, delete_layout, ...), get_database(), data_directory(), ModuleSettings,
+#              array_to_blob(), blob_to_array()
 # NOTES:
 #   - [2026-11-15] Created. Location: $DEVOS_DATA_DIR, else $XDG_DATA_HOME/devos, else
 #                  ~/.local/share/devos; file devos.sqlite3. Tests set DEVOS_DATA_DIR to a temp folder.
 #   - [2026-11-15] One connection, used from the Qt (main) thread only. Writes commit immediately
 #                  (autocommit-style helpers) so a crash never loses settings.
+#   - [2026-11-15] Core v2: user_preferences table. Opening the database and every migration is
+#                  announced in the activity log.
 #   - [2026-11-15] Module tables are prefixed with the module's namespace (e.g. wave_sim_snapshots)
 #                  so modules can't collide.
+#   - [2026-11-16] delete_layout(): a page whose last module tile was closed goes back to "Create New".
 # ==============================================================================
 
 # ==============================================================================
@@ -57,6 +62,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from app.data.activity_log import get_activity_log
 # --- END [1.1] ---
 
 # ==============================================================================
@@ -100,6 +107,13 @@ CORE_MIGRATIONS = [
         updated_at  REAL NOT NULL
     );
     """,
+    """
+    CREATE TABLE user_preferences (
+        key        TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    """,
 ]
 
 
@@ -125,6 +139,7 @@ class Database:
         """Apply migrations[current_version:] for this namespace, each in its own transaction."""
         current_version = self.schema_version(namespace)
         for version, script in enumerate(migrations[current_version:], start=current_version + 1):
+            get_activity_log().info("database", f"Migrating '{namespace}' tables to version {version}")
             with self.transaction():
                 for statement in (part.strip() for part in script.split(";")):
                     if statement:
@@ -179,6 +194,21 @@ class Database:
             "ON CONFLICT(page_key) DO UPDATE SET layout_json = excluded.layout_json, updated_at = excluded.updated_at",
             (page_key, json.dumps(layout), time.time()),
         )
+
+    def get_preference(self, key: str, default: Any = None) -> Any:
+        """App-wide user preference (window, sidebar, log panel ...)."""
+        row = self.fetch_one("SELECT value_json FROM user_preferences WHERE key = ?", (key,))
+        return json.loads(row["value_json"]) if row else default
+
+    def set_preference(self, key: str, value: Any) -> None:
+        self.execute(
+            "INSERT INTO user_preferences (key, value_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+            (key, json.dumps(value), time.time()),
+        )
+
+    def delete_layout(self, page_key: str) -> None:
+        self.execute("DELETE FROM canvas_layouts WHERE page_key = ?", (page_key,))
 
     def load_layout(self, page_key: str) -> dict | None:
         row = self.fetch_one("SELECT layout_json FROM canvas_layouts WHERE page_key = ?", (page_key,))
@@ -249,6 +279,8 @@ def get_database() -> Database:
     """The app-wide Database (opened on first use)."""
     global _shared_database
     if _shared_database is None:
-        _shared_database = Database()
+        with get_activity_log().step("database", "Open user database"):
+            _shared_database = Database()
+        get_activity_log().info("database", f"Database: {_shared_database.path}")
     return _shared_database
 # --- END [3.3] ---
