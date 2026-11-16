@@ -10,8 +10,9 @@
 //      interface transmission losses, reflection coefficient of the bouncing surface, and a
 //      per-path weight (e.g. Fresnel-zone size of the reflecting patch).
 // CONTRACT:
-//   - Requires: C++20, pybind11 >= 2.10, NumPy arrays (C-contiguous; converted if not).
-//   - Exposes (Python module devos_core): trace_segments(...), synthesize_response(...), version()
+//   - Requires: C++20, pybind11 >= 2.10, NumPy arrays (C-contiguous; converted if not), common.hpp
+//   - Exposes: trace_segments(...), synthesize_response(...) (declared in wave_engine.hpp, bound in
+//              bindings.cpp)
 //   - Python mirror with identical maths: app/native/numpy_engine.py (used when this isn't built).
 // NOTES:
 //   - [2026-11-15] Created. Build: python -m app.native.build (CMake, see core/CMakeLists.txt).
@@ -20,21 +21,18 @@
 //                  ends inside a body counts the remainder; segments are assumed to START outside.
 //   - [2026-11-15] Hits within EDGE_EPSILON of either end are ignored, so legs that start/end on a
 //                  surface (reflection points) don't count that surface.
+//   - [2026-11-15] Python bindings moved to bindings.cpp; shared aliases to common.hpp.
 // ==============================================================================
 
-#include <pybind11/complex.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
+#include "wave_engine.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <complex>
 #include <stdexcept>
 #include <vector>
 
-namespace py = pybind11;
-using Complex = std::complex<double>;
+using namespace devos;
 using Vec3 = std::array<double, 3>;
 
 namespace {
@@ -43,9 +41,6 @@ constexpr double SPEED_OF_LIGHT_M_S = 299'792'458.0;
 constexpr double PI = 3.14159265358979323846;
 constexpr double EDGE_EPSILON = 1e-7;      // fraction of the segment
 constexpr double DUPLICATE_HIT = 1e-9;     // same-body hits closer than this are one crossing
-
-template <typename T>
-using Array = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
 inline Vec3 subtract(const Vec3& a, const Vec3& b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
 inline Vec3 cross(const Vec3& a, const Vec3& b) {
@@ -214,17 +209,4 @@ Array<Complex> synthesize_response(Array<double> path_lengths, Array<double> ins
         }
     }
     return response;
-}
-
-PYBIND11_MODULE(devos_core, module) {
-    module.doc() = "DevOS native engine (C++20): ray-mesh tracing and RF channel synthesis";
-    module.def("trace_segments", &trace_segments, py::arg("origins"), py::arg("ends"), py::arg("vertices"),
-               py::arg("faces"), py::arg("face_body"), py::arg("body_count"), py::arg("skip_face"),
-               "Per ray and body: (inside length in metres (R,B) float64, surface crossings (R,B) int32).");
-    module.def("synthesize_response", &synthesize_response, py::arg("path_lengths"), py::arg("inside_length"),
-               py::arg("crossings"), py::arg("reflect_body"), py::arg("path_node"), py::arg("path_weight"),
-               py::arg("refractive_index"),
-               py::arg("reflection"), py::arg("frequencies_hz"), py::arg("node_count"),
-               "Complex channel response H[node, frequency] from traced paths.");
-    module.def("version", [] { return std::string("devos_core 0.1 (C++") + std::to_string(__cplusplus) + ")"; });
 }

@@ -3,13 +3,16 @@
 # OVERVIEW: Bridge to DevOS's C++ engine (devos_core), with a NumPy fallback of identical maths.
 # PURPOSE:
 #   1. Imports devos_core from core/build/ if it has been built (python -m app.native.build).
-#   2. Exposes trace_segments() and synthesize_response() that use C++ when available, NumPy otherwise.
+#   2. Exposes trace_segments(), synthesize_response() and ema() that use C++ when available, NumPy
+#      otherwise (per function, so an older build missing a function still works).
 #   3. self_test(): runs both on the same random scene and reports the largest difference.
 # CONTRACT:
 #   - Requires: numpy; optionally core/build/devos_core*.so
-#   - Exposes: HAS_NATIVE, ENGINE_NAME, trace_segments(), synthesize_response(), self_test()
+#   - Exposes: HAS_NATIVE, ENGINE_NAME, trace_segments(), synthesize_response(), ema(), self_test()
 # NOTES:
 #   - [2026-11-15] Created. Set DEVOS_DISABLE_NATIVE=1 to force the NumPy engine (comparisons, debugging).
+#   - [2026-11-15] Added ema(); dispatch is per function, so an older build without a new native
+#                  function falls back to NumPy for just that function.
 # ==============================================================================
 
 # ==============================================================================
@@ -76,6 +79,13 @@ def synthesize_response(path_lengths, inside_length, crossings, reflect_body, pa
         np.ascontiguousarray(refractive_index, complex),
         np.ascontiguousarray(reflection, complex), np.ascontiguousarray(frequencies_hz, float), int(node_count),
     )
+
+
+def ema(values, alpha: float, initial: float = float("nan")) -> np.ndarray:
+    """Exponential moving average (NaNs skipped); see core/src/series.hpp."""
+    if HAS_NATIVE and hasattr(devos_core, "ema"):
+        return devos_core.ema(np.ascontiguousarray(values, float), float(alpha), float(initial))
+    return numpy_engine.ema(values, alpha, initial)
 # --- END [1.2] ---
 
 # ==============================================================================
@@ -109,5 +119,12 @@ def self_test(seed: int = 3) -> dict:
         native_h = synthesize_response(lengths, numpy_inside, numpy_cross, reflect, nodes, index, gamma, frequencies, 3, weights)
         numpy_h = numpy_engine.synthesize_response(lengths, numpy_inside, numpy_cross, reflect, nodes, weights, index, gamma, frequencies, 3)
         result["max_response_relative_difference"] = float(np.abs(native_h - numpy_h).max() / np.abs(numpy_h).max())
+        series = np.cumsum(rng.normal(size=20_000)) + 100
+        series[:5] = np.nan
+        worst = 0.0
+        for alpha in (0.5, 0.1, 2 / 201, 1 / 14, 0.95):
+            native_e, numpy_e = ema(series, alpha), numpy_engine.ema(series, alpha)
+            worst = max(worst, float(np.nanmax(np.abs(native_e - numpy_e) / np.abs(numpy_e))))
+        result["max_ema_relative_difference"] = worst
     return result
 # --- END [1.3] ---

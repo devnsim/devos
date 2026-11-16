@@ -5,6 +5,7 @@
 # NOTES:
 #   - [2026-11-15] Created. pybind11 is found through its Python package (pybind11_DIR is passed by
 #                  app/native/build.py), so the nix-shell provides everything.
+#   - [2026-11-15] Sources split: bindings.cpp (module), wave_engine.cpp, series.cpp.
 # ==============================================================================
 cmake_minimum_required(VERSION 3.20)
 project(devos_core LANGUAGES CXX)
@@ -18,5 +19,5 @@ endif()
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(devos_core src/wave_engine.cpp)
+pybind11_add_module(devos_core src/bindings.cpp src/wave_engine.cpp src/series.cpp)
 target_compile_options(devos_core PRIVATE -O3 -Wall -Wextra)

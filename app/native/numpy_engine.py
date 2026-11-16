@@ -4,12 +4,15 @@
 # PURPOSE:
 #   1. trace_segments: vectorised Moller-Trumbore over all rays x triangles, then per-body hit parity.
 #   2. synthesize_response: complex channel response from traced paths.
+#   3. ema: exponential moving average, vectorised in blocks (exact up to float rounding).
 # CONTRACT:
 #   - Requires: numpy
-#   - Exposes: trace_segments(), synthesize_response() - same signatures and results as devos_core
+#   - Exposes: trace_segments(), synthesize_response(), ema() - same signatures and results as devos_core
 # NOTES:
 #   - [2026-11-15] Created alongside core/src/wave_engine.cpp. Keep the two in step: the test in
 #                  app/native/__init__.py's self_test() compares them.
+#   - [2026-11-15] Added ema(): closed-form blocks of up to 512 samples (vectorised, exact to rounding);
+#                  interior NaNs fall back to a plain loop.
 # ==============================================================================
 
 # ==============================================================================
@@ -23,6 +26,7 @@
 # 1. ENGINE
 #    1.1 trace_segments
 #    1.2 synthesize_response
+#    1.3 ema
 # ==============================================================================
 
 import numpy as np
@@ -115,3 +119,48 @@ def synthesize_response(path_lengths, inside_length, crossings, reflect_body, pa
     np.add.at(response, np.asarray(path_node), amplitude)
     return response
 # --- END [1.2] ---
+
+
+# ==============================================================================
+# [1.3] ema
+# ==============================================================================
+def ema(values, alpha, initial=np.nan):
+    """y[i] = y[i-1] + alpha * (x[i] - y[i-1]); y starts at x[0] unless initial is finite; NaNs skipped.
+    Blocks of B samples are solved in closed form: y_k = d^(k+1) s + alpha d^k cumsum(d^-j x_j),
+    with d = 1 - alpha and B small enough that d^-B stays far from float overflow."""
+    x = np.asarray(values, float)
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError("ema: alpha must be in (0, 1]")
+    result = np.full(len(x), np.nan)
+    valid = np.isfinite(x)
+    if not valid.any():
+        if np.isfinite(initial):
+            result[:] = initial
+        return result
+    first = int(np.argmax(valid))
+    if not valid[first:].all():                       # interior gaps: exact but slow path
+        state = initial
+        for index, value in enumerate(x):
+            if np.isfinite(value):
+                state = value if not np.isfinite(state) else state + alpha * (value - state)
+            result[index] = state
+        return result
+    if np.isfinite(initial):
+        result[:first] = initial
+        state = initial
+    else:
+        state = x[first]
+    decay = 1.0 - alpha
+    if decay == 0.0:
+        result[first:] = x[first:]
+        return result
+    block = int(max(1, min(512, 250 * np.log(10) / -np.log(decay))))
+    for start in range(first, len(x), block):
+        segment = x[start:start + block]
+        k = np.arange(len(segment))
+        growth = decay ** -k.astype(float)
+        smoothed = decay ** (k + 1) * state + alpha * decay ** k * np.cumsum(segment * growth)
+        result[start:start + len(segment)] = smoothed
+        state = smoothed[-1]
+    return result
+# --- END [1.3] ---
