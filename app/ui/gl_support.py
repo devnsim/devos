@@ -8,6 +8,7 @@
 #   - Requires: pyqtgraph, PyOpenGL (optional), a QGuiApplication before opengl_unavailable_reason()
 #   - Exposes: gl (module or None), HAS_OPENGL, MIN_OPENGL_VERSION, opengl_unavailable_reason()
 # NOTES:
+#   - [2026-11-15] The probe result is announced in the activity log (OpenGL version or why 3D is off).
 #   - [2026-11-15] Moved out of tensor_inspector_module.py so every 3D module shares one probe.
 #                  GLViewWidget fails only inside initializeGL() on first show (uncatchable there and
 #                  it took the app down), so modules must check this before creating one.
@@ -27,6 +28,8 @@
 # ==============================================================================
 # [1.1] import_and_probe
 # ==============================================================================
+from app.data.activity_log import get_activity_log
+
 try:
     import pyqtgraph.opengl as gl
     HAS_OPENGL = True
@@ -46,10 +49,12 @@ def opengl_unavailable_reason() -> str:
         return _opengl_probe_result
     if not HAS_OPENGL:
         _opengl_probe_result = "PyOpenGL not installed"
+        get_activity_log().warning("graphics", "3D views disabled: PyOpenGL not installed")
         return _opengl_probe_result
     from PySide6.QtGui import QGuiApplication, QOffscreenSurface, QOpenGLContext
     if QGuiApplication.platformName() in ("offscreen", "minimal"):
         _opengl_probe_result = f"no OpenGL on the '{QGuiApplication.platformName()}' platform"
+        get_activity_log().warning("graphics", f"3D views disabled: {_opengl_probe_result}")
         return _opengl_probe_result
     context = QOpenGLContext()
     surface = QOffscreenSurface()
@@ -61,6 +66,10 @@ def opengl_unavailable_reason() -> str:
         context.doneCurrent()
         is_usable = (version[0], version[1]) >= MIN_OPENGL_VERSION
         _opengl_probe_result = "" if is_usable else f"OpenGL {version[0]}.{version[1]} < 2.1"
+        if is_usable:
+            get_activity_log().success("graphics", f"OpenGL {version[0]}.{version[1]} available for 3D views")
     surface.destroy()
+    if _opengl_probe_result:
+        get_activity_log().warning("graphics", f"3D views disabled: {_opengl_probe_result}")
     return _opengl_probe_result
 # --- END [1.1] ---

@@ -11,13 +11,14 @@
 #   - Requires: QSS selector #pane_splitter in app/ui/theme.py (seams)
 #   - Exposes: DROP_ZONE_CENTER/LEFT/RIGHT/TOP/BOTTOM, EDGE_DROP_ZONES, EDGE_SPLITS,
 #              EDGE_ZONE_FRACTION, edge_zone_at(), zone_preview_rect(), new_splitter(),
-#              insert_beside(), swap_leaves(), normalize_tree(), first_leaf()
+#              insert_beside(), swap_leaves(), normalize_tree(), first_leaf(), top_right_leaf()
 # NOTES:
 #   - [2026-11-15] Extracted from tab_area.py so TabArea (tab panes) and ModuleCanvas (module tiles)
 #                  tile with the exact same rules. Functions only touch QSplitters and leaf widgets;
 #                  the callers keep their own bookkeeping (lists of panes/tiles, active pane...).
 #   - [2026-11-15] No QSplitter.replaceWidget() anywhere: PySide hands the replaced widget to Python,
 #                  which then garbage-collects it (and every page inside). insertWidget() moves instead.
+#   - [2026-11-15] Added top_right_leaf() (window controls live in the top-right pane's tab row).
 # ==============================================================================
 
 # ==============================================================================
@@ -244,6 +245,17 @@ def first_leaf(root_splitter: QSplitter) -> QWidget | None:
         if widget.count() == 0:
             return None
         widget = widget.widget(0)
+    return widget
+
+
+def top_right_leaf(root_splitter: QSplitter) -> QWidget | None:
+    """The tile in the top-right corner: last child of side-by-side splitters, first of stacked ones."""
+    widget = root_splitter
+    while isinstance(widget, QSplitter):
+        if widget.count() == 0:
+            return None
+        is_side_by_side = widget.orientation() == Qt.Orientation.Horizontal
+        widget = widget.widget(widget.count() - 1 if is_side_by_side else 0)
     return widget
 
 
