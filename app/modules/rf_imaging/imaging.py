@@ -28,6 +28,7 @@
 #   - [2026-11-15] Plain CLEAN (one reflector at a time) was replaced by orthogonal matching pursuit
 #                  with joint least-squares refits: on noiseless test data CLEAN got 11/94 scene points
 #                  right because neighbouring reflectors' sub-band echoes overlap.
+#   - [2026-11-15] Health pass: removed unused SparseReflectorJob.is_done.
 #   - [2026-11-15] Static materials come from a SparseReflectorJob on the clutter background spread over frames
 #                  (bounded cost per frame); the moving target gets its own small CLEAN near the track.
 #   - [2026-11-15] Materials come from sparse reflectors, not raw voxels: with only 25 channels the
@@ -243,10 +244,6 @@ class SparseReflectorJob:
         self.support: list[int] = []                                                # positions in candidates
         self._atoms: list[np.ndarray] = []
         self._is_done = len(candidates) == 0
-
-    @property
-    def is_done(self) -> bool:
-        return self._is_done
 
     def step(self, pick_count: int) -> bool:
         """Add up to pick_count reflectors; returns True when finished."""

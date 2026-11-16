@@ -10,11 +10,12 @@
 #   - Requires: QSS selectors #module_panel, #module_title_label, #calendar_month_label,
 #               #calendar_nav_btn, #calendar_weekday_label, #calendar_day_btn,
 #               #calendar_selected_label in app/ui/theme.py
-#   - Exposes: CalendarModule(context=None) (QFrame); signals date_selected(QDate), month_changed(int, int);
+#   - Exposes: CalendarModule(parent=None, context=None) (ModuleView); signals date_selected(QDate), month_changed(int, int);
 #              selected_date(), set_selected_date(date), show_month(year, month), show_today()
 # NOTES:
 #   - [2026-11-15] Takes an optional ModuleContext; when given, the selected day is saved in the
 #                  module's settings (SQLite) and restored next time.
+#   - [2026-11-15] Health pass: built on ModuleView (shared settings helpers).
 #   - [2026-11-15] Created. First "module": a panel with no page-specific logic, so it can later
 #                  be placed freely on the snap-grid canvas. Shared objectName module_panel lets
 #                  every future module share one frame style.
@@ -23,6 +24,7 @@
 #   - [2026-11-15] Day state is exposed as dynamic properties (is_today, is_outside_month,
 #                  is_weekend) used as QSS selectors; buttons are repolished after each change.
 #   - [2026-11-15] Moved from app/ui/modules/calendar_module.py (module apps live in app/modules/<name>/).
+#   - [2026-11-15] Header row ends with reserve_controls_space() (module tiles' corner controls).
 # ==============================================================================
 
 # ==============================================================================
@@ -55,15 +57,19 @@
 # ==============================================================================
 from PySide6.QtCore import QDate, QLocale, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout,
+    QButtonGroup, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout,
 )
+
+from app.modules.base import ModuleView
+from app.ui.canvas.tile_canvas import reserve_controls_space
+from app.ui.ui_tools import set_style_property
 # --- END [1.1] ---
 
 
 # ==============================================================================
 # [2.1] class_constants
 # ==============================================================================
-class CalendarModule(QFrame):
+class CalendarModule(ModuleView):
     """Month calendar panel: navigate months, select a day."""
 
     date_selected = Signal(QDate)
@@ -88,16 +94,15 @@ class CalendarModule(QFrame):
 # [2.2] init_module
 # ==============================================================================
     def __init__(self, parent=None, context=None) -> None:
-        super().__init__(parent, objectName="module_panel")
-        self.context = context
+        super().__init__(parent, context, "module_panel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)   # QSS frame on a QWidget subclass
         self.today_date = QDate.currentDate()
         self._selected_date = self.today_date
         self.shown_month = (self.today_date.year(), self.today_date.month())
-        if context is not None:
-            saved_date = QDate.fromString(context.settings.get("selected_date", ""), Qt.DateFormat.ISODate)
-            if saved_date.isValid():
-                self._selected_date = saved_date
-                self.shown_month = (saved_date.year(), saved_date.month())
+        saved_date = QDate.fromString(self.setting("selected_date", ""), Qt.DateFormat.ISODate)
+        if saved_date.isValid():
+            self._selected_date = saved_date
+            self.shown_month = (saved_date.year(), saved_date.month())
         self.day_btns: list[QToolButton] = []
         self.cell_dates: list[QDate] = []
 
@@ -134,6 +139,7 @@ class CalendarModule(QFrame):
         header_layout.addWidget(self.previous_month_btn)
         header_layout.addWidget(self.today_btn)
         header_layout.addWidget(self.next_month_btn)
+        reserve_controls_space(header_layout)
         self.module_layout.addLayout(header_layout)
 
     def _nav_btn(self, text: str, tool_tip: str, on_click) -> QToolButton:
@@ -158,7 +164,7 @@ class CalendarModule(QFrame):
                 objectName="calendar_weekday_label",
                 alignment=Qt.AlignmentFlag.AlignCenter,
             )
-            weekday_label.setProperty("is_weekend", "true" if column_index >= 5 else "false")
+            set_style_property(weekday_label, "is_weekend", column_index >= 5)
             self.day_grid_layout.addWidget(weekday_label, 0, column_index)
 
         # Exclusive group: checking one day unchecks the previous one
@@ -199,8 +205,7 @@ class CalendarModule(QFrame):
         self._selected_date = date
         self.show_month(date.year(), date.month())
         if has_changed:
-            if self.context is not None:
-                self.context.settings.set("selected_date", date.toString(Qt.DateFormat.ISODate))
+            self.save_setting("selected_date", date.toString(Qt.DateFormat.ISODate))
             self.date_selected.emit(date)
 
     def show_month(self, year: int, month: int) -> None:
@@ -235,12 +240,9 @@ class CalendarModule(QFrame):
             day_btn.setText(str(cell_date.day()))
             day_btn.setToolTip(cell_date.toString(self.SELECTED_LABEL_FORMAT))
             day_btn.setChecked(cell_date == self._selected_date)
-            day_btn.setProperty("is_today", "true" if cell_date == self.today_date else "false")
-            day_btn.setProperty("is_outside_month", "true" if cell_date.month() != month else "false")
-            day_btn.setProperty("is_weekend", "true" if cell_date.dayOfWeek() >= 6 else "false")
-            # Dynamic properties only restyle after an unpolish/polish
-            day_btn.style().unpolish(day_btn)
-            day_btn.style().polish(day_btn)
+            set_style_property(day_btn, "is_today", cell_date == self.today_date)
+            set_style_property(day_btn, "is_outside_month", cell_date.month() != month)
+            set_style_property(day_btn, "is_weekend", cell_date.dayOfWeek() >= 6)
 
         # Exclusive groups can't uncheck everything; drop exclusivity if the selection is off-grid
         if self._selected_date not in self.cell_dates:

@@ -13,6 +13,7 @@
 #   - Exposes: SweepSettings, WAVEFORM_FMCW, WAVEFORM_OFDM, lc_tank_frequency_hz(),
 #              lc_tank_capacitance_f(), WaveTensor
 # NOTES:
+#   - [2026-11-15] Health pass: removed unused complex_history().
 #   - [2026-11-15] Created. The channel is computed in the frequency domain; FMCW vs OFDM only
 #                  changes which frequencies are sampled (both measure H(f) at those points).
 # ==============================================================================
@@ -128,10 +129,6 @@ class WaveTensor:
     def node_history(self, node: int) -> np.ndarray:
         """(filled_time, frequency, 2) for one node, oldest first."""
         return self.data[node, self.time_order()]
-
-    def complex_history(self, node: int) -> np.ndarray:
-        history = self.node_history(node)
-        return history[..., 0] * np.exp(1j * history[..., 1])
 
     def as_tensor4d(self) -> Tensor4D:
         """Time-ordered copy with named axes (node, t, f, part)."""
