@@ -5,6 +5,28 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
 ### Added
+- Agents chat: + New agent → Claude / Gemini / Ollama agent; a Chat view that streams answers from the selected
+  agent (its Instructions are the system prompt), chats kept per agent (rename, save to Library, delete), provider
+  and model switchable in the view; ⚙ settings for API keys (system keyring) and the Ollama address; Provider and
+  Max output tokens properties.
+- Record views: double-click a record on the board, timeline (name or bar) or calendar to open its form view;
+  right-click a record in any view for Open form, module actions (Agents: Chat with agent), Duplicate, Delete.
+- `app/data/store/secrets.py` (keyring secrets shared by Comms and Agents); `run_in_thread(on_progress=…)`;
+  `BlockCanvas.show_block(kind)`; `StepProgressBar`.
+- Canvas pages: New Canvas on an empty page; an endless grid of module cards that snap while moving / resizing,
+  pan / zoom / fit, double-click or right-click to add, saved with the page (`InfiniteCanvasPage`).
+- Several windows: "Open in new window" in the tab menu, or drag a tab out of every window; tabs drag between
+  windows; renames / deletions reach every window (`Workspace`).
+- Web apps: browser bar hidden by default; options menu (floating ⋯, the bar's ⋯, right-click → Web app) with
+  the bar toggle, navigation, find / zoom and Change site; a "Show / hide browser bar" tool.
+- Physics: `ControllerSnapshot` in every worldline row: seek / branch restore commands, PID integrators and the
+  running program's cursor bit for bit; `devos_physics_cli --pid actuator=kp,ki,kd`.
+- Physics engine groundwork (`core/physics/`, standalone C++20 project): `libdevos_physics.so` with PhysicsWorld
+  (facade, master clock, Z-up frame, step / reset / seek / branch), SceneLoader (MJCF bundles: machine → MuJoCo,
+  room → Jolt, convex meshes), CoupledStepper (1 kHz lock-step, kinematic mirroring, contact forces into
+  `xfrc_applied`), WorldlineBuffer (flat ring of per-tick rows, zero-copy, exact seek via Jolt keyframes) and
+  ControllerPort (setpoints, PID, S-curves, G-code, springs, sensor frames); `devos_physics_cli`, CTest suite,
+  pybind11 module, demo scene. Eigen3 and MuJoCo added to `shell.nix`; Jolt fetched at a pinned tag.
 - Toolbars in every module tile (grip menu → Add toolbar): dock top / bottom / left / right or float, snap by
   dragging, sizes, pin, drag tools to reorder; the tool bag (global tools + module tools) and Ctrl+K to run a tool.
 - Record model (`records.py`) with reusable views (table, board, timeline / Gantt, calendar, form, + Property);
@@ -34,6 +56,14 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
   docked resizable panel, filters, past sessions; saved to SQLite every 15 s and at exit; Python / thread / Qt hooks.
 
 ### Changed
+- Part Design: the 1-4 step list on the left is now a progress bar across the top (name, steps, Back / Next in
+  one row; the work area uses the full width). Clicking a locked step says why it can't start.
+- `shell.nix` provides n8n (the only unfree package allowed; `--arg withN8n false` skips it); the n8n web app
+  preset points there instead of `npm install -g`.
+- Tests use keyring's null backend and drop provider API keys from the environment.
+- Pages whose tab is closed (or whose window closes) are suspended: their web views are discarded, so sound and
+  scripts stop; they reload when opened again. (Closing every tab used to leave web pages playing.)
+- Jolt is fetched as the v5.7.0 release archive verified by SHA256 (`URL_HASH`) instead of a git tag.
 - Status bar reads only the CPU temperature sensor (reading every hardware sensor each second stalled the UI 60-300 ms).
 - Qt WebEngine is shut down in order on exit (quitting and the test run no longer end in a segfault).
 - Pages show their canvas as soon as it holds a module, however it was added.

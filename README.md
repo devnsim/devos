@@ -8,6 +8,18 @@ Purpose:
 
 # Updates
 
+- **[2026-11-17] Chat with agents, project forms, Part Design progress bar, n8n in the shell.**
+  - **Agents:** *+ New agent* makes a Claude, Gemini or Ollama agent. The new **Chat** view talks to the selected agent and streams its answers; each agent keeps its own chats. The agent's Instructions are its system prompt. API keys stay in the system keyring (⚙ settings) or the usual environment variable; Ollama runs locally and needs no key.
+  - **Records:** double-click a project on the board, timeline or calendar to open its form; right-clicking a record in any view offers *Open form*, *Duplicate* and *Delete*.
+  - **Part Design:** the steps run across the top as a progress bar instead of a sidebar list.
+  - **n8n** comes with `shell.nix` (pinned with the rest of the shell), so the n8n web app no longer depends on a global install.
+- **[2026-11-17] Canvas pages, several windows, quiet closed pages, web app options, controller snapshots.**
+  - **Canvas pages:** a new page kind (*New Canvas* on an empty page). It's an endless grid where modules sit on cards that snap to the grid; you can pan, zoom and fit, and the cards and view are saved with the page.
+  - **Several windows:** any tab opens in a new window, from the tab menu or by dragging the tab out of every window. The new window is a full DevOS window, and tabs can be dragged between windows.
+  - **Closed pages are suspended:** a page with no tab stops its web content (sound included) and reloads when it's opened again.
+  - **Web apps** hide the browser bar by default and keep their options in a ⋯ menu.
+  - **Physics:** seek and branch now restore PID integrators, commands and the running G-code program bit for bit, and Jolt's download is verified by SHA256.
+- **[2026-11-16] Physics engine groundwork (`core/physics/`).** A standalone C++20 library (`libdevos_physics.so`) with no dependency on Python, Qt or `app/`. MuJoCo simulates the machine (robots, gantries, drones) and Jolt the room (floors, fixtures, loose bodies), coupled at 1 kHz with contact forces fed back into MuJoCo. The five components are PhysicsWorld, SceneLoader, CoupledStepper, WorldlineBuffer and ControllerPort. Runs are deterministic; seek and branch are bit-exact. It comes with a headless CLI, CTest tests, a thin pybind11 module and a demo scene. See `core/physics/README.md`.
 - **[2026-11-16] Toolbars, records & views, nine new modules.**
   - **Toolbars:** every module tile can hold toolbars (grip ⠿ → *Add toolbar*). A toolbar arrives blank; right-click it to add tools from the tool bag, dock it to an edge or float it, resize, pin or remove it. Drag the grip to snap it to another edge; drag tools to reorder. Global tools (calculator, quick note, capture, timestamp, colour picker, web search, new browser tab, System Log) work everywhere; module tools only show for their module. **Ctrl+K** searches and runs any tool.
   - **Records & views:** a reusable "every line is a record with properties" model (SQLite, JSON values). The same records show as a table, a board, a timeline (Gantt), a calendar or a form; users can add their own properties. **Agents** (role, type, model, permissions, tools, instructions; export an agent file) and **Projects** use it.
@@ -61,7 +73,14 @@ devos/
 │   ├── src/bindings.cpp          # the devos_core Python module (binds everything below)
 │   ├── src/wave_engine.cpp       # ray-mesh tracing + RF channel synthesis
 │   ├── src/series.cpp            # time-series filters (ema) for indicators and simulations
-│   └── build/                    # build output (git-ignored): devos_core*.so
+│   ├── build/                    # build output (git-ignored): devos_core*.so
+│   └── physics/                  # PHYSICS ENGINE: standalone CMake project (no app/ references), see its README.md
+│       ├── include/devos/physics/ # public API: physics_world, scene_loader, coupled_stepper, worldline_buffer, controller_port, types
+│       ├── src/                  # implementation (+ jolt_world: the internal Jolt wrapper)
+│       ├── tools/physics_cli.cpp # devos_physics_cli headless runner (--verify, --csv, --gcode)
+│       ├── tests/test_physics.cpp# CTest suite
+│       ├── python/bindings.cpp   # thin pybind11 adapter -> devos_physics module
+│       └── scenes/demo/          # machine.xml (MuJoCo) + environment.xml (Jolt) + parts/ (convex meshes)
 ├── app/
 │   ├── main.py                   # entry point: main()
 │   ├── native/                   # bridge to devos_core (+ identical NumPy fallback, build helper)
@@ -76,12 +95,14 @@ devos/
 │   │       ├── database.py       # SQLite: migrations per namespace, module settings, layouts, preferences
 │   │       ├── content.py        # ContentStore: the user's files (notes, datasets, captures, CAD, databases, sheets …) in <data>/library/
 │   │       ├── pages.py          # PageStore: the user's pages (canvas / browser), folders, favourites
-│   │       └── records.py        # RecordCollection: records with declared properties (agents, projects …)
+│   │       ├── records.py        # RecordCollection: records with declared properties (agents, projects …)
+│   │       └── secrets.py        # passwords / API keys in the system keyring (never in SQLite)
 │   ├── modules/                  # MODULE APPS: each = view (UI) + engine (logic / C++) + store (SQLite)
 │   │   ├── registry.py           # MODULE_LIBRARY, ModuleSpec, ModuleContext, create_module()
 │   │   ├── base.py               # ModuleView: base class of every module view (settings, live loop, blocks)
 │   │   ├── records_module.py     # RecordsModule: base of record modules (toolbar + record views)
-│   │   ├── agents/, projects/    # record modules: view.py
+│   │   ├── agents/               # record module + chat: engine.py (Claude / Gemini / Ollama), store.py (chats), blocks.py (Chat), view.py
+│   │   ├── projects/             # record module: view.py
 │   │   ├── spreadsheet/          # formulas.py (no eval), engine.py (sheets, xlsx / csv, LibreOffice), view.py
 │   │   ├── graph_db/             # Kùzu graph databases: engine.py, view.py
 │   │   ├── map/                  # Leaflet map: store.py (places), view.py
@@ -100,7 +121,7 @@ devos/
 │   │   └── calendar/             # month calendar: view.py
 │   └── ui/
 │       ├── theme.py              # all colors / QSS styling (palette, size tokens, *_QSS sections)
-│       ├── main_window.py        # MainWindow: sidebar + tab workspace + status bar; page provider for TabArea
+│       ├── main_window.py        # MainWindow: sidebar + tab workspace + status bar; Workspace (shared by all windows)
 │       ├── gl_support.py         # shared OpenGL probe for 3D views
 │       ├── ui_tools.py           # set_style_property(), control_label(), tool_button(), block helpers, run_in_thread()
 │       ├── tool_bag.py           # ToolSpec registry, ToolBagPopup (search), global tools, active module
@@ -117,6 +138,7 @@ devos/
 │       ├── pages/
 │       │   ├── canvas_page.py          # CanvasPage: THE page template (editable title + Create New / module canvas)
 │       │   ├── browser_page.py         # BrowserPage: a page that is a web browser
+│       │   ├── infinite_canvas_page.py # InfiniteCanvasPage: "Canvas" page - module cards on an endless snapping grid
 │       │   └── placeholder_page.py     # PlaceholderPage: stand-in (used by Settings for now)
 │       └── widgets/
 │           ├── sidebar.py        # Sidebar (collapsible navigation) + load_icon()
@@ -125,6 +147,7 @@ devos/
 │           ├── tiling_layout.py  # shared splitter-tree engine (split, swap, tidy, drop zones)
 │           ├── status_bar.py     # SystemStatusBar: IDE-style bottom bar with resource tiles + Log tile
 │           ├── log_panel.py      # LogPanel: the System Log view (filters, search, past sessions)
+│           ├── step_bar.py       # StepProgressBar: a workflow's steps as a progress bar (Part Design)
 │           └── title_bar.py      # integrated title bar: window controls, resize frame, drag-to-move
 ```
 
@@ -228,12 +251,18 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `Dataset` / `make_mock()` | Class / function | `app/modules/graph/datasets.py` | Table of numbers from a library CSV / generated mock data (`MOCK_GENERATORS`). |
 | `NotesModule` | Class (`ModuleView`) | `app/modules/notes/view.py` | Markdown notes: pick / create / rename / delete, Edit / Split / Preview, autosave. |
 | `LibraryModule` | Class (`ModuleView`) | `app/modules/library/view.py` | Browser for the content library: filter by kind, rename, import, export, delete, preview. |
-| page kind | Concept (`str`) | `app/data/store/pages.py` | `"canvas"` (modules, `CanvasPage`) or `"browser"` (`BrowserPage`); pages also keep a small JSON state (`page_state()`). |
-| Create New panel | UI element (`create_new_panel`) | `CanvasPage` | What an empty page shows: New Module / New Browser. |
+| page kind | Concept (`str`) | `app/data/store/pages.py` | `"canvas"` (tiled modules, `CanvasPage`), `"browser"` (`BrowserPage`) or `"infinite_canvas"` (`InfiniteCanvasPage`, shown as "Canvas"); pages also keep a small JSON state (`page_state()`). |
+| Create New panel | UI element (`create_new_panel`) | `CanvasPage` | What an empty page shows: New Module / New Browser / New Canvas (`kind_requested` → `MainWindow.convert_page()`). |
+| `InfiniteCanvasPage` / `InfiniteCanvas` | Classes (`QWidget`) | `app/ui/pages/infinite_canvas_page.py` | The "Canvas" page: an endless dotted grid (`GRID_PX` per cell at 100 %). Pan by dragging the grid or scrolling, Ctrl+scroll zooms, Fit, double-click adds a card. Cards, cells and the view are saved under the page's canvas key. |
+| `ModuleCard` | Class (`CanvasTile`) | `app/ui/pages/infinite_canvas_page.py` | A module on a canvas card: drag the header to move it and the corner grip to resize it (whole cells, so it snaps). The ⋯ menu offers replace, toolbars, bring to front and close; closing keeps the module's data. |
+| cell | Concept | `InfiniteCanvas` | One grid square; card positions and sizes are whole cells `[x, y, w, h]`. |
+| `Workspace` | Class (`QObject`) | `app/ui/main_window.py` | What all DevOS windows share: page store, page widgets (a page has one tab across all windows), the parked-pages panel and the log flush. `open_in_new_window()`, `window_with_page()`. |
+| suspended page | Concept | `TabArea`, `web_support.set_web_views_suspended()` | A page with no tab (closed, or its window closed): its web views are discarded (no sound, scripts or memory) and reload when it gets a tab again. Moves between panes and windows never suspend. |
+| browser bar (web app) | Concept (setting `show_browser_bar`) | `WebAppModule` | Hidden by default so a web app looks like part of DevOS; toggled from the options menu (floating ⋯, the bar's ⋯, or "Web app" in the page's right-click menu). |
 | `new_tab_btn` | UI element (`QToolButton`) | `TabGroup` | The + right after the last tab: new page (Ctrl+T). |
 | `BrowserPage` | Class (`QWidget`) | `app/ui/pages/browser_page.py` | Web browser page: navigation, address / search bar, find, zoom; named after the site until renamed. |
 | `web_support` | Module | `app/ui/web_support.py` | `prepare_web_engine()` (before QApplication), `web_engine_unavailable_reason()`, `browser_profile()`, `address_to_url()`. |
-| `mouse_hub()` / `WindowMouseHub` | Function / class | `app/ui/window_events.py` | Mouse presses of watched windows: `pressed(QWidget)` signal, `add_press_handler()`. Use instead of app-wide event filters. |
+| `mouse_hub()` / `WindowMouseHub` | Function / class | `app/ui/window_events.py` | Mouse presses of watched windows: `pressed(QWidget)` signal, `add_press_handler()` / `remove_press_handler()`. Use instead of app-wide event filters. |
 | `DbEditorModule` | Class (`ModuleView`) | `app/modules/db_editor/view.py` | Database Editor: toolbar + shared state (connection, table, query, row) for its blocks. |
 | `UserDatabases` / `DbConnection` | Classes | `app/modules/db_editor/engine.py` | The user's SQLite databases (Library kind `database`, plus the read-only system database) / one open database: rows, schema, SQL, properties. |
 | row key | Concept (`dict`) | `db_editor/engine.py` | How an edit finds its row again: `{"rowid": n}`, or the primary-key columns for WITHOUT ROWID tables. |
@@ -256,20 +285,35 @@ Alphabetical. **Where** = the file or the class that owns it.
 | record / `RecordCollection` | Concept / class | `app/data/store/records.py` | "Every line is a record with properties": records of one collection in SQLite (JSON values); `get_collection(name, defaults)` shares one per name; users can add properties. |
 | `PropertySpec` | Class | `app/data/store/records.py` | One declared property: key, title, kind (text, long_text, number, select, multi_select, date, checkbox, url), options. |
 | view (record view) | Concept | `app/ui/record_views.py` | One picture of the same records: `TableBlock`, `BoardBlock`, `TimelineBlock` (Gantt), `CalendarBlock`, `FormBlock`; shared selection / search via `RecordsController`. |
-| `RecordsModule` | Class (`ModuleView`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`); `AgentsModule`, `ProjectsModule` use it. |
+| `RecordsModule` | Class (`ModuleView`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`, optional `NEW_RECORD_PRESETS`; hooks `extra_block_specs()`, `record_actions()`); `AgentsModule`, `ProjectsModule` use it. |
 | `agent_definition()` | Function | `app/modules/agents/view.py` | An agent record as Markdown with front matter (name, description, model, tools from permissions) + instructions. |
+| provider | Concept | `app/modules/agents/engine.py` | Who runs an agent's model: Claude (Anthropic API), Gemini (Google AI API) or Ollama (local server). The agent's Provider property; `provider_of()` guesses it for older agents. |
+| `stream_chat()` / `ChatConfig` | Function / class | `app/modules/agents/engine.py` | One chat turn with a provider, streamed piece by piece; failures become `AgentError` with a message the user can act on. `chat_config()` turns an agent record into a `ChatConfig`. |
+| `ChatStore` / conversation | Class / concept | `app/modules/agents/store.py` | An agent's chats (`agents_conversations`, `agents_messages`); `get_chat_store()` shares one per database. Deleting an agent keeps its chats. |
+| `ChatBlock` | Class (block) | `app/modules/agents/blocks.py` | The Agents module's Chat view: follows the selected agent, switches its provider / model, streams answers, lists / saves / deletes chats. |
+| `get_secret()` / `set_secret()` | Functions | `app/data/store/secrets.py` | Secrets (Comms passwords, Agents API keys) in the system keyring; session memory when there is no keyring. `secret_storage()` says where they go. |
+| `open_form()` / `record_menu()` | Methods | `RecordsController` (`app/ui/record_views.py`) | Double-click a record → `open_form()` → `form_requested`; right-click a record in any view → `record_menu()` (Open form, module `record_actions`, Duplicate, Delete). |
+| `show_block()` | Method | `BlockCanvas` (`app/ui/canvas/block_canvas.py`) | Bring a block of a kind forward, or open one beside the active block. |
+| `StepProgressBar` | Class (`QWidget`) | `app/ui/widgets/step_bar.py` | A workflow's steps as numbered circles on a filling line (current / done / open / locked); Part Design's top bar. |
 | tool / `ToolSpec` | Concept / class | `app/ui/tool_bag.py` | A small action (glyph, title, description, `run(module_view)`); global, or bound to one module type (`module_type_id`). `register_tools()`, `tools_for()`, `search_tools()`. |
 | `ToolBagPopup` | Class | `app/ui/tool_bag.py` | Searchable tool list: adds tools to a toolbar ("add") or runs one on the active module ("run", Ctrl+K). |
 | `ToolDock` / `ToolTray` | Classes | `app/ui/toolbars.py` | Toolbars around every module tile: trays dock top / bottom / left / right or float, sizes, pin; saved in the module's `toolbars` setting. |
-| `run_in_thread()` | Function | `app/ui/ui_tools.py` | Slow work on a worker thread; `on_done(result, error)` back on the UI thread. |
+| `run_in_thread()` | Function | `app/ui/ui_tools.py` | Slow work on a worker thread; `on_done(result, error)` back on the UI thread. With `on_progress`, `work(report)` streams values to the UI thread (chat answers). |
 | `status_label()` / `set_status()` | Functions | `app/ui/ui_tools.py` | A module's one-line outcome label (red when `is_error`). |
 | `SpreadsheetModule` / `Workbook` / `Sheet` | Classes | `app/modules/spreadsheet/` | Spreadsheet: grid with formula bar and sheet tabs; formulas in `formulas.py` (no eval); xlsx / csv, LibreOffice for ods / xls / pdf. |
 | `GraphDbModule` / `GraphDb` | Classes | `app/modules/graph_db/` | Kùzu graph databases (Library kind `graph`): schema, Cypher console, graph view, inspector. |
 | `MapModule` / `MapStore` | Classes | `app/modules/map/` | Leaflet map: base layers, places (SQLite `map_places`), GeoJSON layers (Library kind `geo`). |
 | `CadModule` / `Part` / `PartDesignWindow` | Classes | `app/modules/cad/` | CAD models in 3D (`MeshViewer`); parametric parts (sketches + pad / pocket / hole) designed in the Part Design window. |
-| `CommsModule` / `CommsStore` | Classes | `app/modules/comms/` | Email over IMAP / SMTP (passwords in the system keyring); text and calls are placeholders. |
+| `CommsModule` / `CommsStore` | Classes | `app/modules/comms/` | Email over IMAP / SMTP (passwords in the system keyring via `secrets.py`); text and calls are placeholders. |
 | `MonitorModule` / `find_insights()` | Class / function | `app/modules/monitor/` | Software Monitor: system history, processes (scanned off the UI thread), inefficiency insights, DevOS footprint. |
 | `WebAppModule` / container | Class / concept | `app/modules/web_app/view.py`, `web_support.container_profile()` | A site in a module tile with its own persistent browser profile (separate logins); presets for local tools (n8n). |
+| `PhysicsWorld` | Class (C++) | `core/physics/include/devos/physics/physics_world.hpp` | Physics facade: MuJoCo + Jolt, master clock (ticks at `rate_hz`), `load_scene` / `step` / `reset` / `seek` / `branch`, poses, controller, worldline. |
+| `SceneLoader` / scene bundle | Class / concept (C++) | `core/physics/.../scene_loader.hpp` | A folder with `machine.xml` (MuJoCo) and `environment.xml` (Jolt: static bodies, `<freejoint/>` = dynamic); machine bodies get kinematic Jolt proxies. |
+| `CoupledStepper` | Class (C++) | `core/physics/.../coupled_stepper.hpp` | One lock-step tick: coupling wrench → controller → `mj_step` → mirror to Jolt → Jolt step → contacts become the next `xfrc_applied`. |
+| `WorldlineBuffer` / worldline | Class / concept (C++) | `core/physics/.../worldline_buffer.hpp` | Ring of flat per-tick rows (observation block + exact restore block); zero-copy to Python; exact seek with Jolt keyframes. |
+| `ControllerPort` | Class (C++) | `core/physics/.../controller_port.hpp` | Drives `mjData->ctrl` (raw, setpoints, PID, S-curve, G-code) and spring forces; returns a `SensorFrame` per tick. |
+| `ControllerSnapshot` | Struct (C++) | `core/physics/.../controller_port.hpp` | The controller's carried state: per-actuator commands, PID gains, integrators and previous errors, plus the running program and its segment cursor. Stored in every worldline row (`restore.control.*`), so seek and branch restore closed-loop control bit for bit. |
+| `devos_physics_cli` | Tool | `core/physics/tools/physics_cli.cpp` | Headless runner: report, `--csv` worldline, `--gcode`, `--verify` (determinism, seek, branch). |
 | `shutdown_web_engine()` | Function | `app/ui/web_support.py` | Deletes web pages before their profiles when the app (or test run) ends; avoids a Qt WebEngine segfault. |
 
 ### Approved abbreviations
