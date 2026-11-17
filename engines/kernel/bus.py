@@ -21,6 +21,7 @@
 #              manifests(), is_running(), request(), call(), stream(), subscribe(), publish(), stats(), health(),
 #              add_tap(), remove_tap(), shutdown(); StreamHandle (cancel, ack); Subscription; REQUEST_TIMEOUT_S
 # NOTES:
+#   - [2026-11-17] Phase 5b: hosts get subscribe= (Engine.watch).
 #   - [2026-11-17] Phase 5a: hosts get ask= (Engine.ask goes through request(), so it is tapped, timed and counted).
 #   - [2026-11-17] Phase 3: detach / not_attached, request timeouts (watchdog), stream windows + credit, per-engine
 #                  stats, taps for the bus inspector, health(). Rewritten around one _Pending record per request.
@@ -188,7 +189,7 @@ class Bus:
                 engine_class = self._engines.get(engine_id)
             if engine_class is None:
                 self.manifest(engine_id)
-            host = self.host_class(engine_class, self._deliver, ask=self._ask)
+            host = self.host_class(engine_class, self._deliver, ask=self._ask, subscribe=self.subscribe)
             host.start()                              # raises EngineError when the engine can't start
             with self._lock:
                 self._hosts[engine_id] = host

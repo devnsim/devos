@@ -5,6 +5,15 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
 ### Added
+- Engine plan Phase 5b (views over Data):
+  - View types `grid` (paged by the engine, editable, copy / paste, + Column), `chart` (line / bar / scatter,
+    dates and categories, totals grouped in the engine) and `network` (a graph table's graph);
+    `app/views/graph_canvas.py` shared with the Links view.
+  - Data engine views (`engines/data/views.py`, engine.json `views`): Sheet, SQL console, Cypher console,
+    Structure; requests `structure`, `cells`, `set_cell`, `sql`, `cypher`; `graph` takes a collection.
+  - `Engine.watch()`: events of engines in `uses`, handled on the engine's thread; Data watches
+    `knowledge.changed` (op "external" when another tool changed a file).
+  - `ViewType.accepts`, `MappingSlot.auto`, `host.add_property(formula=…)`; `tests/test_data_views.py`.
 - Engine plan Phase 5a (Data engine, `engines/data/`):
   - One source contract for record collections, user SQLite databases (`db:<item>/<table>`), CSV datasets
     (`csv:<item>`), workbook sheets (`sheet:<item>/<sheet>`) and Kùzu node tables (`graph:<item>/<table>`);
@@ -18,6 +27,9 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
   - `tests/test_data_engine.py` (SQL pushdown compared with the memory toolkit on 18 questions, every source).
 
 ### Changed
+- Knowledge's `refresh_size` announces the change (`by` names who made it); the Graph Database module reports
+  its writes. Optional mapping slots never reuse a field another slot took. A table view whose title column is
+  also a field shows it once.
 - Record collections moved from the records engine to the Data engine (same tables); saved views are upgraded
   (`ENGINE_RENAMES`); RecordsModule, the Data view module and tests use `data.*`.
 - `formulas.py`, the spreadsheet workbook logic and `GraphDb` moved to `engines/toolkit/` (shared by the Data

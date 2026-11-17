@@ -1,6 +1,6 @@
 # DevOS Roadmap
 
-Last updated: **2026-11-17** (Phase 5a done: the Data engine; 5b views next — see Now)
+Last updated: **2026-11-17** (Phase 5a–5b done: the Data engine and its views; 5c templates next — see Now)
 
 The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog records what changed, and this file records where DevOS stands and what comes next. The design behind it (engines, data shapes, protocol, contracts) is in [docs/architecture/engine-plan.md](docs/architecture/engine-plan.md); what is stored where is in [docs/architecture/data-ownership.md](docs/architecture/data-ownership.md).
 
@@ -24,9 +24,10 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
     - data shapes and Query v1;
     - the Knowledge engine, sole owner of the Library (core engine; `library()` client; Notes and Library are views over it, with Document and Links views);
     - the Data engine (5a): records, user databases, CSV datasets, sheets and graphs behind one source contract;
+    - views over it (5b): Grid, Chart, Network, and Data's Sheet, SQL / Cypher consoles and Structure;
     - the view runtime (ViewHost, page-wide channels, shared subscriptions, view builder, Data view tiles);
     - docking: engine packages, attach / detach with placeholders, conformance kit, Settings → Engines, bus inspector.
-- **Engine plan:** Phases 0–4 done, Phase 5a done. Projects and Agents run on the view runtime over the Data engine; Notes and Library over Knowledge. The other modules still run as modules; they move into engines phase by phase.
+- **Engine plan:** Phases 0–4 done, Phase 5a–5b done. Projects and Agents run on the view runtime over the Data engine; Notes and Library over Knowledge. The other modules still run as modules; they move into engines phase by phase.
 
 ## Now
 
@@ -45,8 +46,14 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
 - Shared logic moved to `engines/toolkit/` (formulas, workbook, kuzu_db); saved views of the records engine upgrade on load (`ENGINE_RENAMES`).
 - Tests: `tests/test_data_engine.py`; the kit passes 9 of 9; the fixture opens unchanged.
 
-**Start here (5b).** The generic views over any Data table: an editable grid (paging through big tables, `_rowid` keys, computed columns shown read-only), a chart view (Table → line / bar / scatter, using the `Series` toolkit for decimation), and a network view on `data.graph`. Then the specialist views: sheet (cells and formulas), SQL / Cypher consoles (new `data.sql` / `data.cypher` requests) and table structure. Decide the open question on how Data hears Knowledge's changes first (below).
+**5b done (2026-11-17).** What was built:
+- **Engine.watch** (the 5b open question, answered: engines watch the engines they declare in `uses`; events are handled on the engine's own thread, in order with requests). Knowledge's `refresh_size` announces in-place changes with `by`; Data watches `knowledge.changed` and refreshes views of files other tools changed (op "external"), skipping its own writes. The Graph Database module reports its writes.
+- **Generic views:** `grid` (paged by the engine, 200 rows; edit in place; copy / paste blocks; + Column with formulas; computed columns read-only), `chart` (line / bar / scatter, dates and categories on X, Totals by X grouped in the engine), `network` (a graph table's graph on the shared `GraphCanvas`, also used by Links).
+- **Data's own views** (`engines/data/views.py`): Sheet (cells, formula bar), SQL console, Cypher console (history, results, what changed), Structure (columns, keys, indexes, foreign keys, relationships; + Column / Remove). Requests `structure`, `cells`, `set_cell`, `sql`, `cypher`.
+- **View API:** `ViewType.accepts(source)` (the builder offers only views the data fits), `MappingSlot.auto`, `host.add_property(formula=…)`.
+- Tests: `tests/test_data_views.py` (8), watch tests in `tests/test_data_engine.py`; 125 pass; Data kit 9 of 9.
 
+**Start here (5c).** Templates: a template = engines + schema + view definitions + block layout + toolbars (the plan's Template contract). Start with the built-ins (Projects, Agents definitions, Events, Database, Spreadsheet, Graph DB) as data, a "Save as template" on any SourceModule page, and the picker showing Templates and "New view of an engine". Then migration: old module tiles (Database Editor, Spreadsheet, Graph Database, Calendar, Graph, Projects, Agents) open as template instances with their settings carried over, and the fixture's pages must open with the same data and layouts. Done when those modules, `RecordsModule` and the `records_adapter_defaults` table (copied into template schemas, kept one version) are gone.
 
 ## Next
 
@@ -248,7 +255,8 @@ DevOS is a **host platform** for organising and visualising any kind of data: ch
 ## Future ideas
 
 Ideas raised but not yet placed in a phase:
-- Data: re-read a Kùzu node table's columns when the Graph Database module changes its schema (SQLite tables already follow `schema_version`).
+- Grid: fetch the next page as you scroll, instead of ‹ › page buttons.
+- Chart: more than two series (one per group of a select field).
 - Data: formula properties that refer to other collections (relations, rollups).
 - Document view: reload a note that another view or window changed while it is open (today only the item you switch to is re-read).
 - Backlinks in the Document view (which notes link here), from Knowledge's `links`.
@@ -262,7 +270,7 @@ Ideas raised but not yet placed in a phase:
 
 ## Open questions
 
-- **Phase 5b:** Data doesn't hear Knowledge's `changed` events (engines can't subscribe to other engines yet), so a file rewritten by the Spreadsheet or Database Editor module only shows in Data views at their next question. Add `Engine.watch()` for engines in `uses` (recommended), or have Knowledge include file kinds in events the front end forwards?
+- **Phase 5c:** do user templates live in the workspace database as rows (recommended, like pages), or as files in the Library so they back up and move with it?
 - **Phase 6:** MapLibre GL for the interactive map (recommended), or keep Leaflet? For print layouts, render them in the engine, or hand them to QGIS (`qgis_process` with a layout)?
 - **Phase 7:** are all monitors on one machine, or can some belong to other machines from the start?
 - **Phase 12:** Python-only user views, or also a sandboxed option?

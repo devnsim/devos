@@ -15,6 +15,7 @@
 #              run_query(text), show_graph(sample), select_element(element); SchemaBlock, CypherBlock,
 #              GraphViewBlock, InspectorBlock
 # NOTES:
+#   - [2026-11-17] Phase 5b: writes are reported to the Library (refresh_size), so Data views of the graph refresh.
 #   - [2026-11-17] GraphDb is imported from engines.toolkit.kuzu_db (moved in Phase 5a; the Data engine shares it).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (KuzuDB graph database view).
@@ -60,7 +61,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.clients.library import library
+from app.clients.library import LibraryError, library
 from app.modules.base import ModuleView
 from engines.toolkit.kuzu_db import (
     KUZU_TYPES, GraphDb, GraphDbError, GraphSample, describe, element_key, is_node, is_rel, kuzu_unavailable_reason,
@@ -567,8 +568,17 @@ class GraphDbModule(ModuleView):
             self.report(f"Sample data: {error}", is_error=True)
             return
         self.schema_changed.emit()
+        self._touch()
         self.show_whole_graph()
         self.report("Loaded the sample graph — try: MATCH (p:Person)-[:LivesIn]->(c:City) RETURN p, c")
+
+    def _touch(self) -> None:
+        """Tell the Library the file changed (its size, and every view of it through the Data engine)."""
+        if self.item_id is not None:
+            try:
+                self.store.refresh_size(self.item_id)
+            except LibraryError as error:
+                self.report(str(error), is_error=True)
 
     def run_query(self, text: str, show_graph: bool = False) -> list:
         if self.graph_db is None:
@@ -585,6 +595,7 @@ class GraphDbModule(ModuleView):
             if any(statement.statement.split()[0].upper() in ("CREATE", "DROP", "ALTER", "MERGE", "DELETE", "SET", "COPY")
                    for statement in outcomes):
                 self.schema_changed.emit()
+                self._touch()
         self.query_ran.emit(outcomes)
         if show_graph and outcomes and not failed:
             sample = GraphSample()

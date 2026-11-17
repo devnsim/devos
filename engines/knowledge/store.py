@@ -13,6 +13,7 @@
 #               Used ONLY by engines/knowledge (checked by tools/check_standard.py).
 #   - Exposes: ContentStore(database, on_change=None), ContentItem
 # NOTES:
+#   - [2026-11-17] refresh_size announces the change (content=True): a file changed in place is news for the Data engine.
 #   - [2026-11-17] Moved here from app/data/store/content.py (engine plan Phase 4): the Knowledge engine owns the
 #                  Library. Kinds and size_text() moved to app/data/content_kinds.py; get_content_store() and
 #                  listeners are gone (changes become "knowledge.changed" events); write_text() reports changes too.
@@ -200,11 +201,12 @@ class ContentStore:
         self._changed(self.get(item_id).kind, item_id, content=True)
 
     def refresh_size(self, item_id: int) -> None:
-        """Re-read the size of a file that was changed in place (e.g. a database being edited)."""
+        """Re-read the size of a file that was changed in place (e.g. a database being edited) and announce it."""
         path = self.path(item_id)
         if path.exists():
             self.database.execute("UPDATE content_items SET size_bytes = ?, updated_at = ? WHERE item_id = ?",
                                   (path.stat().st_size, time.time(), item_id))
+            self._changed(self.get(item_id).kind, item_id, content=True)
 
     def rename(self, item_id: int, name: str) -> str:
         item = self.get(item_id)

@@ -6,13 +6,14 @@
 #   1. Collection ids: record collections keep their plain names ("projects"); file tables are
 #      "<kind>:<library item id>[/<table>]" - db:12/parts, csv:34, sheet:56/Budget, graph:78/Person.
 #   2. Source: schema / query / get / create / update / duplicate / delete / move / add_property /
-#      remove_property; a source that can't do something says so ("not_allowed") instead of failing.
+#      remove_property / structure; a source that can't do something says so ("not_allowed") instead of failing.
 #   3. Writes return diffs ({key: [old, new]}) so the engine can announce what changed.
 # CONTRACT:
 #   - Requires: engines.kernel (EngineError), app.data.store.records (coerce_value, PropertySpec). No Qt.
 #   - Exposes: Source, FileRef, parse_collection(), file_collection(), coerce(), infer_kind(), field(), diff(),
 #              FILE_KINDS, ROW_KEY
 # NOTES:
+#   - [2026-11-17] Phase 5b: Source.structure() for the Structure view.
 #   - [2026-11-17] Created in Phase 5a of the engine plan.
 # ==============================================================================
 
@@ -199,6 +200,14 @@ class Source:
 
     def remove_property(self, key: str) -> None:
         raise self.refuse("its columns are changed in its own tool")
+
+    def structure(self) -> dict:
+        """How the collection is built (the Structure view): its columns, plus whatever the kind of data adds."""
+        return {"kind": "table", "title": self.title, "columns": [
+            {"name": item["key"], "title": item["title"], "kind": item["kind"], "type": item.get("declared", item["kind"]),
+             "read_only": bool(item.get("read_only")), "formula": item.get("formula", ""),
+             "primary_key": bool(item.get("primary_key")), "is_user": bool(item.get("is_user"))}
+            for item in self.fields()]}
 
     def close(self) -> None:
         """Let go of open files (the engine stops, or the file changed)."""

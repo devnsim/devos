@@ -11,6 +11,7 @@
 #               app.ui.canvas.tile_canvas.reserve_controls_space, QSS selector #records_table
 #   - Exposes: TableView(host), TABLE_VIEW (registered as "table")
 # NOTES:
+#   - [2026-11-17] Phase 5b: a title column that is also a field (file tables) shows once.
 #   - [2026-11-17] Fields marked read_only can't be edited in place (Library sizes, dates).
 #   - [2026-11-17] Ported from app/ui/record_views.py TableBlock onto the view API (Phase 2).
 # ==============================================================================
@@ -54,7 +55,9 @@ class RowsModel(QAbstractTableModel):
     def reload(self, data: TableData) -> None:
         self.beginResetModel()
         self.data_source = data
-        self.columns = [{"key": data.title_key, "title": "Name", "kind": "text", "options": []}] + data.fields
+        title = data.field(data.title_key)                 # file tables list their title column as a field too
+        self.columns = [title or {"key": data.title_key, "title": "Name", "kind": "text", "options": []}] + \
+            [field for field in data.fields if field["key"] != data.title_key]
         self.rows = data.rows
         self.endResetModel()
 

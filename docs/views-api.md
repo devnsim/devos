@@ -29,6 +29,8 @@ register_view_type(ViewType("my_view", "My view", "What it shows", ("table",), M
                             slots=(MappingSlot("group", "Group by", ("select",), required=True),)))
 ```
 
+- **accepts:** `accepts(source) -> bool` when the view only fits some sources (the SQL console: `db:` tables). The builder hides it elsewhere; a saved one says it can't show the data.
+- **MappingSlot(auto=False):** an optional slot stays empty until the user picks a field (a chart's second Y). Optional slots never reuse a field another slot took.
 - **requests:** other requests the view needs from its source engine besides the query (`ViewType(..., requests=("read_text", "write_text"))`). The builder only offers the view for data whose engine answers them; a saved view over data that doesn't explains why in its place ("The Document view needs data that answers read_text…").
 
 - **shapes:** the data shapes the view can draw (see [shapes.md](shapes.md)). The builder only offers views that can draw the chosen data.
@@ -43,7 +45,7 @@ register_view_type(ViewType("my_view", "My view", "What it shows", ("table",), M
 | Changing the view | `host.set_mapping(slot, field_key)`, `host.set_presentation(key, value)`, `host.set_query(sort=…, search=…, filter=…)` (changes the question; the engine runs it) |
 | Selection | `host.selected_id`, `host.select(id)`. Page-wide unless unlinked; `host.is_linked`, `host.set_linked(bool)` |
 | Records | `host.open_record(id)` (selects, then shows a form: the module's form block, or a small linked window), `host.show_record_menu(id, global_pos)` / `host.record_menu(id)` (Open form, module actions, Duplicate, Delete) |
-| Writes | `host.update_record(id, values)`, `host.set_value(id, key, value)`, `host.create_record(values, title)`, `host.duplicate_record(id)`, `host.move_record(id, before_id)`, `host.delete_records(ids)` (asks first), `host.add_property(title, kind, options)`, `host.remove_property(key)` |
+| Writes | `host.update_record(id, values)`, `host.set_value(id, key, value)`, `host.create_record(values, title)`, `host.duplicate_record(id)`, `host.move_record(id, before_id)`, `host.delete_records(ids)` (asks first), `host.add_property(title, kind, options, formula)`, `host.remove_property(key)` |
 | Other requests | `host.request(name, payload, on_reply)`: any request of the source engine (`read_text`, `write_text`, `links` …); `on_reply(payload, error)` on the UI thread. Declare it in `ViewType.requests` |
 | UI | `host.view_menu_button()` (put it in your top row: filter, follow the page's selection, Edit view…), `host.report(text, is_error)` |
 
@@ -77,5 +79,7 @@ An engine package can bring view types: its `views` module calls `register_view_
 ## Source contract (engines that serve views)
 
 An engine whose data views can show answers `<engine>.query` with `{**source params, "query": Query v1}` and returns a Table shape, and emits `<engine>.changed` with the source params of what changed. Editable sources also answer `update`, `create`, `duplicate`, `delete`, `move`, `add_property` and `remove_property`. Sources are listed through `<engine>.collections` and `<engine>.schema`. A Table shape names its row key (`key`, e.g. `_rowid` for file tables) and views use it; write replies carry the new row's `id` (and `record`). The Data engine's `changed` events add `op` (create, update, delete, move, schema) and `changes` ({id: {field: [old, new]}}). Read-only fields carry `"read_only": true` in the schema (forms show them, never edit them). The builder lists the collections of every attached engine that follows this contract (`engines.runtime.sources()`): today the Data engine (every record collection and every table in the Library's databases, datasets, sheets and graphs), the Knowledge engine (`library` and one table per kind; `create` makes a note, `update` renames) and the example `sample_data` engine.
+
+**Data views.** Built in: `grid` (paged, editable, paste), `chart` (line / bar / scatter; totals grouped by the engine), `network` (`graph` request; `graph:` tables). Shipped by the Data engine (`engines/data/views.py`): `sheet` (`cells`, `set_cell`), `sql_console` (`sql`), `cypher_console` (`cypher`), `structure` (`structure`).
 
 **Library views.** `document` (Markdown editor with live preview and autosave; text files read-only; `[[Note]]` links select that note) and `links` (notes as a graph) need `read_text` / `write_text` and `links`: Knowledge answers them. `SourceModule` (`app/modules/source_module.py`) is a module made of such views over one source: Notes and Library are built on it, like the record modules.

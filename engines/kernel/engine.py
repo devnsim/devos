@@ -10,11 +10,13 @@
 #   3. emit(event, payload) publishes a declared event; log(level, text) reaches the System Log through
 #      the bus ("<engine>.log" events), so engines never import the app's log.
 #   4. Job: the request being handled; long handlers check job.is_cancelled() and stop early.
-#   5. ask(topic, payload): ask an engine named in MANIFEST.uses and wait (never one that asks back: no cycles).
+#   5. ask(topic, payload): ask an engine named in MANIFEST.uses and wait (never one that asks back: no cycles);
+#      watch(pattern, handler): hear its events, on this engine's own thread.
 # CONTRACT:
 #   - Requires: engines.kernel.messages. Standard library only.
-#   - Exposes: Engine (MANIFEST, start, stop, health, emit, log, ask, handler), Job, Reply, LOG_LEVELS, ASK_TIMEOUT_S
+#   - Exposes: Engine (MANIFEST, start, stop, health, emit, log, ask, watch, handler), Job, Reply, LOG_LEVELS, ASK_TIMEOUT_S
 # NOTES:
+#   - [2026-11-17] Phase 5b: Engine.watch(pattern, handler) - events of engines in MANIFEST.uses, handled on the engine's thread.
 #   - [2026-11-17] Phase 5a: Engine.ask(topic, payload) - ask an engine declared in MANIFEST.uses (Data asks Knowledge for files).
 #   - [2026-11-17] Phase 3: Job credit (stream back-pressure: take_credit / add_credit).
 #   - [2026-11-17] Created in Phase 1 of the engine plan.
@@ -103,11 +105,24 @@ class Engine:
     def __init__(self) -> None:
         self._publish: Callable[[Message], None] | None = None
         self._ask: Callable[..., dict] | None = None
+        self._watch: Callable[[str, Callable[[Message], None]], None] | None = None
 
-    def attach(self, publish: Callable[[Message], None], ask: Callable[..., dict] | None = None) -> None:
-        """Called by the host: where this engine's events go, and how it asks other engines."""
+    def attach(self, publish: Callable[[Message], None], ask: Callable[..., dict] | None = None,
+               watch: Callable[[str, Callable[[Message], None]], None] | None = None) -> None:
+        """Called by the host: where this engine's events go, how it asks and watches other engines."""
         self._publish = publish
         self._ask = ask
+        self._watch = watch
+
+    def watch(self, pattern: str, handler: Callable[[Message], None]) -> None:
+        """Hear another engine's events ("knowledge.changed", "knowledge.*") - one declared in MANIFEST.uses.
+        handler(message) runs on this engine's thread, between requests, in the order the events came; it keeps
+        working across the other engine being detached and attached again. Call it from start()."""
+        target = pattern.split(".", 1)[0]
+        if target not in self.MANIFEST.uses or target == self.MANIFEST.engine_id:
+            raise EngineError(f"{self.MANIFEST.title} doesn't declare that it uses “{target}”", code="undeclared_use")
+        if self._watch is not None:
+            self._watch(pattern, handler)
 
     def ask(self, topic: str, payload: dict | None = None, attachments: dict | None = None,
             timeout_s: float = ASK_TIMEOUT_S) -> dict:

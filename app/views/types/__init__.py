@@ -6,9 +6,10 @@
 #   1. One place that lists every built-in view type; engine-bundled views (Phase 3) and user views (Phase 12)
 #      register the same way.
 # CONTRACT:
-#   - Requires: app.views.types (table, board, timeline, calendar, form, document, links)
-#   - Exposes: BUILT_IN (type ids in picker order), LIBRARY_VIEWS
+#   - Requires: app.views.types (table, grid, board, timeline, calendar, form, chart, document, links, network)
+#   - Exposes: BUILT_IN (type ids in picker order), LIBRARY_VIEWS, GRAPH_VIEWS
 # NOTES:
+#   - [2026-11-17] Phase 5b: Grid, Chart (any table) and Network (graph tables) view types.
 #   - [2026-11-17] Document and Links view types (Phase 4).
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
 # ==============================================================================
@@ -17,6 +18,7 @@
 # [DEFINITIONS]
 # - BUILT_IN (tuple): The built-in view type ids for any table source, in the order pickers show them.
 # - LIBRARY_VIEWS (tuple): Built-in view types for sources with documents (read_text / write_text / links).
+# - GRAPH_VIEWS (tuple): Built-in view types for tables that are part of a graph (network).
 # ==============================================================================
 
 # ==============================================================================
@@ -28,8 +30,9 @@
 # ==============================================================================
 # [1.1] registration
 # ==============================================================================
-from app.views.types import board, calendar, document, form, links, table, timeline  # noqa: F401  (each registers itself)
+from app.views.types import board, calendar, chart, document, form, grid, links, network, table, timeline  # noqa: F401
 
-BUILT_IN = ("table", "board", "timeline", "calendar", "form")       # any table source
+BUILT_IN = ("table", "grid", "board", "timeline", "calendar", "form", "chart")   # any table source
 LIBRARY_VIEWS = ("document", "links")                               # sources answering read_text / links (Knowledge)
+GRAPH_VIEWS = ("network",)                                          # tables inside a graph ("graph" request)
 # --- END [1.1] ---

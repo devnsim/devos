@@ -9,11 +9,12 @@
 #      without formulas: rows would shift under them).
 #   2. Writes keep the file's own format: .xlsx is edited in place with openpyxl (formatting stays); CSV / TSV
 #      are rewritten. Formats DevOS reads through LibreOffice (.ods, .xls) are read-only here.
-#   3. sheet_names(path): the sheets of a workbook.
+#   3. sheet_names(path): the sheets of a workbook. cells() / set_cell(): the Sheet view (formulas typed in).
 # CONTRACT:
 #   - Requires: engines.toolkit (workbook, formulas, table), engines.data.common, openpyxl (for .xlsx).
 #   - Exposes: GridTable(ref, path, title), sheet_names(path), EDITABLE_EXTENSIONS
 # NOTES:
+#   - [2026-11-17] Phase 5b: cells() / set_cell() for the Sheet view; structure().
 #   - [2026-11-17] Created in Phase 5a of the engine plan.
 # ==============================================================================
 
@@ -184,6 +185,32 @@ class GridTable(Source):
                 os.unlink(temporary)
         self._stamp = None
         self._load()
+
+    def cells(self) -> dict:
+        """Every non-empty cell: what was typed and what it shows (the Sheet view)."""
+        self._load()
+        cells = []
+        for (row, col), raw in sorted(self.sheet.cells.items()):
+            value = self.sheet.value(row, col)
+            cells.append([row, col, raw, format_value(_plain(value)), self.sheet.error_detail(row, col) if _is_error(value) else ""])
+        return {"rows": self.row_count, "cols": self.col_count, "cells": cells, "editable": self.is_editable}
+
+    def set_cell(self, row: int, col: int, raw: str) -> None:
+        """Type into one cell (0-based), formulas included - the Sheet view's way in."""
+        self._check_editable()
+        if row < 0 or col < 0:
+            raise EngineError("Cells start at row 1, column A", code="invalid_value")
+        if raw.startswith("="):
+            from engines.toolkit.formulas import FormulaError, parse
+            try:
+                parse(raw)
+            except FormulaError as error:
+                raise EngineError(f"The formula doesn't read: {error}", code="invalid_value") from None
+        self._commit({(row, col): raw})
+
+    def structure(self) -> dict:
+        return {**super().structure(), "kind": "sheet" if self.ref.prefix == "sheet" else "csv",
+                "rows": len(self.rows), "file_type": self.path.suffix.lower(), "editable": self.is_editable}
 
     def update(self, row_id, values: dict) -> tuple[dict, dict]:
         self._check_editable()

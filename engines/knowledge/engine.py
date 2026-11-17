@@ -13,8 +13,10 @@
 # CONTRACT:
 #   - Requires: engines.kernel, engines.toolkit.table, engines.knowledge.store, app.data (database,
 #               content_kinds; no Qt). Its own database connection, opened on its thread.
+#   - Events: changed {kind, ids, content, by} ("by": who changed it, when they said - refresh_size).
 #   - Exposes: KnowledgeEngine (MANIFEST id "knowledge"), MANIFEST, item_payload(item), item_row(item), LINK
 # NOTES:
+#   - [2026-11-17] refresh_size announces the change, with an optional "by" (Data skips its own writes).
 #   - [2026-11-17] read_text fills the Document shape's links with a note's [[links]].
 #   - [2026-11-17] Phase 4: the whole Library (file service, source contract, links); the store moved in here.
 #   - [2026-11-17] Shapes use the kernel names ("table", "document"; the conformance kit caught it); examples for the kit.
@@ -82,7 +84,8 @@ MANIFEST = EngineManifest(
         RequestSpec("register_path", "Add a file written at a new_path to the Library", params=KIND + ("name", "path"),
                     optional=("metadata",), effect=W),
         RequestSpec("unique_name", "A free name (“Untitled note 2”)", params=KIND + ("base",)),
-        RequestSpec("refresh_size", "Re-read the size of a file changed in place", params=ITEM, effect=W),
+        RequestSpec("refresh_size", "Re-read the size of a file changed in place (and announce it)", params=ITEM,
+                    optional=("by",), effect=W),
         RequestSpec("links", "Notes and their [[links]] as a graph", shape="graph", example={}),
         RequestSpec("collections", "The Library and each kind of item, as tables", example={}),
         RequestSpec("schema", "The fields of a Library table", params=("collection",), example={"collection": "library"}),
@@ -132,12 +135,13 @@ class KnowledgeEngine(Engine):
     def start(self) -> None:
         self.database = Database(data_directory() / DATABASE_FILE_NAME)   # this thread's own connection
         self.store = ContentStore(self.database, on_change=self._on_change)
+        self._by = ""                                  # who made the change being handled ("data" ...), if they said
 
     def stop(self) -> None:
         self.database.close()
 
     def _on_change(self, kind: str, ids: list[int] | None, content: bool) -> None:
-        self.emit("changed", {"kind": kind, "ids": ids, "content": content})
+        self.emit("changed", {"kind": kind, "ids": ids, "content": content, "by": self._by})
 
     def _item(self, item_id) -> ContentItem:
         item = self.store.get(int(item_id))
@@ -241,7 +245,11 @@ class KnowledgeEngine(Engine):
         return {"name": self.store.unique_name(self._kind(payload["kind"]), str(payload["base"]))}
 
     def on_refresh_size(self, payload: dict, _job: Job) -> dict:
-        self.store.refresh_size(self._item(payload["item_id"]).item_id)
+        self._by = str(payload.get("by") or "")
+        try:
+            self.store.refresh_size(self._item(payload["item_id"]).item_id)
+        finally:
+            self._by = ""
         return {"item": item_payload(self._item(payload["item_id"]))}
 # --- END [1.3] ---
 

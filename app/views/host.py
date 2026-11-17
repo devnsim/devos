@@ -19,6 +19,8 @@
 #               #view_message_label, #view_menu_btn
 #   - Exposes: ViewHost(definition, record_actions=None, parent=None) with signals state_changed, status(str, bool)
 # NOTES:
+#   - [2026-11-17] add_property(formula=...) for formula properties (Data engine).
+#   - [2026-11-17] Phase 5b: a view type that can't show this source (ViewType.accepts) says so instead of failing.
 #   - [2026-11-17] Phase 5a: a new row's id comes from the reply's "id" when there is one (file tables key rows by "_rowid").
 #   - [2026-11-17] request(): a view can ask its source engine for more (a note's text, the link graph) - Phase 4.
 #   - [2026-11-17] Phase 3: placeholders when the source engine or the view's engine is detached; back on attach.
@@ -133,6 +135,9 @@ class ViewHost(QWidget):
         if kind is None:
             self._show_message(f"This view needs the “{self.view_type_id}” view, which isn't available. If an engine "
                                "ships it, attach that engine in Settings → Engines. The view is kept.")
+            return
+        if not kind.can_show(self.source):
+            self._show_message(f"The {kind.title} view can't show this data. Choose other data with Edit view….")
             return
         missing = self._missing_requests(kind)
         if missing:
@@ -336,8 +341,9 @@ class ViewHost(QWidget):
             return
         self._write("delete", {"ids": list(record_ids)}, lambda reply: self.report(f"Deleted {reply['what']}"))
 
-    def add_property(self, title: str, kind: str, options: tuple[str, ...] = ()) -> None:
-        self._write("add_property", {"title": title, "kind": kind, "options": list(options)},
+    def add_property(self, title: str, kind: str, options: tuple[str, ...] = (), formula: str = "") -> None:
+        self._write("add_property", {"title": title, "kind": kind, "options": list(options)} |
+                    ({"formula": formula} if formula else {}),
                     lambda reply: self.report(f"Added property “{reply['field']['title']}”"))
 
     def remove_property(self, key: str) -> None:

@@ -17,6 +17,7 @@
 #   - Exposes: InProcessHost(engine_class, deliver) with start(), send(message), stop(), thread_name, queue_depth;
 #              INBOX_LIMIT, HEALTH_REQUEST
 # NOTES:
+#   - [2026-11-17] Phase 5b: watched events (Engine.watch) go through the inbox, so handlers run on the engine's thread; stop unsubscribes.
 #   - [2026-11-17] Phase 5a: passes the bus's ask() to its engine (Engine.ask).
 #   - [2026-11-17] Phase 3: bounded inbox (busy), stream credit (back-pressure), built-in "_health", queue_depth.
 #   - [2026-11-17] Created in Phase 1 of the engine plan.
@@ -44,6 +45,7 @@ from __future__ import annotations
 import queue
 import threading
 import traceback
+from dataclasses import dataclass
 from typing import Callable
 
 from engines.kernel.engine import Engine, Job, Reply
@@ -58,10 +60,18 @@ HEALTH_REQUEST = "_health"
 # ==============================================================================
 # [1.2] in_process_host
 # ==============================================================================
+@dataclass(frozen=True)
+class _Watched:
+    """An event an engine watches, waiting in its inbox with the handler that hears it."""
+    message: Message
+    handler: Callable[[Message], None]
+
+
 class InProcessHost:
     def __init__(self, engine_class: type[Engine], deliver: Callable[[Message], None],
-                 ask: Callable[..., dict] | None = None) -> None:
-        self.engine_class, self.deliver, self.ask = engine_class, deliver, ask
+                 ask: Callable[..., dict] | None = None, subscribe: Callable | None = None) -> None:
+        self.engine_class, self.deliver, self.ask, self.subscribe = engine_class, deliver, ask, subscribe
+        self._subscriptions: list = []
         self.manifest = engine_class.MANIFEST
         self.thread_name = f"engine:{self.manifest.engine_id}"
         self.engine: Engine | None = None
@@ -104,6 +114,9 @@ class InProcessHost:
                               code="busy") from None
 
     def stop(self, timeout_s: float = 5.0) -> None:
+        for subscription in self._subscriptions:
+            subscription.unsubscribe()                    # no more watched events once stopping starts
+        self._subscriptions.clear()
         with self._jobs_lock:
             for job in self._jobs.values():
                 job.cancel()                              # running streams stop at their next item
@@ -114,7 +127,7 @@ class InProcessHost:
     def _run(self) -> None:
         try:
             self.engine = self.engine_class()
-            self.engine.attach(self.deliver, self.ask)
+            self.engine.attach(self.deliver, self.ask, self._watch if self.subscribe else None)
             self.engine.start()
         except BaseException as error:                # reported by start(); the thread ends
             self._start_error = error
@@ -122,7 +135,9 @@ class InProcessHost:
             return
         self._started.set()
         while (message := self._inbox.get()) is not None:
-            if message.kind == "request":
+            if isinstance(message, _Watched):
+                self._handle_event(message)
+            elif message.kind == "request":
                 self._handle(message)
         try:
             self.engine.stop()
@@ -173,6 +188,22 @@ class InProcessHost:
         finally:
             with self._jobs_lock:
                 self._jobs.pop(request.message_id, None)
+
+    def _watch(self, pattern: str, handler: Callable[[Message], None]) -> None:
+        """Engine.watch: events matching pattern join the inbox, so the handler runs on the engine's thread."""
+        def arrived(message: Message) -> None:
+            try:
+                self._inbox.put_nowait(_Watched(message, handler))
+            except queue.Full:                        # never block the engine that published it
+                self.engine.log("warning", f"Missed {message.topic}: {self.manifest.title} is too busy")
+        self._subscriptions.append(self.subscribe(pattern, arrived))
+
+    def _handle_event(self, watched: "_Watched") -> None:
+        try:
+            watched.handler(watched.message)
+        except Exception as error:                    # a bug in a handler: logged, the engine keeps running
+            self.engine.log("error", f"Handling {watched.message.topic} failed: {error}\n"
+                                     f"{''.join(traceback.format_exception(error))}")
 
     def _answer(self, kind: str, request: Message, result) -> None:
         payload, attachments = (result.payload, result.attachments) if isinstance(result, Reply) else (result or {}, {})

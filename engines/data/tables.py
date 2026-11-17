@@ -13,6 +13,7 @@
 #               path comes from Knowledge (Data never looks into the Library itself).
 #   - Exposes: SqliteTable(ref, path, title), table_names(path), kind_for_type(declared), SQL_TYPES
 # NOTES:
+#   - [2026-11-17] Phase 5b: structure() (columns, indexes, foreign keys, SQL) and sql() for the SQL console.
 #   - [2026-11-17] Columns are re-read when the file's schema_version changes (the Database Editor added one).
 #   - [2026-11-17] Created in Phase 5a of the engine plan.
 # ==============================================================================
@@ -225,6 +226,57 @@ class SqliteTable(Source):
             f"WHERE rowid IN ({marks})", ids)]
         self._write(f"DELETE FROM {self.table} WHERE rowid IN ({marks})", ids)
         return names
+
+    def structure(self) -> dict:
+        self._fresh()
+        indexes = []
+        for _seq, name, unique, *_rest in self._execute(f"PRAGMA index_list({self.table})", ()):
+            columns = [info[2] for info in self._execute(f"PRAGMA index_info({quote_identifier(name)})", ())]
+            indexes.append({"name": name, "unique": bool(unique), "columns": columns})
+        foreign = [{"column": row[3], "table": row[2], "to": row[4]}
+                   for row in self._execute(f"PRAGMA foreign_key_list({self.table})", ())]
+        sql = self._execute("SELECT sql FROM sqlite_master WHERE name = ?", (self.ref.table,))
+        columns = super().structure()["columns"]
+        for column, (_name, _declared, notnull, default, _pk) in zip(columns, self.columns):
+            column.update(not_null=notnull, default=default)
+        return {"kind": "view" if self.is_view else "table", "title": self.title, "columns": columns,
+                "indexes": indexes, "foreign_keys": foreign, "sql": sql[0][0] if sql else "",
+                "rows": self._execute(f"SELECT COUNT(*) FROM {self.table}", ())[0][0]}
+
+    def sql(self, script: str, row_limit: int) -> tuple[list[dict], bool]:
+        """Run one or more statements on this table's database: (results, did it write). Stops at the first
+        error, which comes back as that result's "error"."""
+        results, wrote, statement = [], False, ""
+        for line in script.splitlines(keepends=True):
+            statement += line
+            if not sqlite3.complete_statement(statement):
+                continue
+            results.append(self._statement(statement.strip(), row_limit))
+            wrote = wrote or results[-1]["changed"] > 0 or results[-1]["writes"]
+            statement = ""
+            if results[-1]["error"]:
+                return results, wrote
+        if statement.strip():
+            results.append(self._statement(statement.strip(), row_limit))
+            wrote = wrote or results[-1]["changed"] > 0 or results[-1]["writes"]
+        return results, wrote
+
+    def _statement(self, statement: str, row_limit: int) -> dict:
+        result = {"statement": statement, "columns": [], "rows": [], "truncated": False, "changed": 0, "error": "",
+                  "writes": not statement.lstrip("(").split(None, 1)[0].upper() in ("SELECT", "WITH", "PRAGMA", "EXPLAIN")}
+        try:
+            with self.connection:
+                cursor = self.connection.execute(statement)
+                if cursor.description:
+                    result["columns"] = [item[0] for item in cursor.description]
+                    rows = cursor.fetchmany(row_limit + 1)
+                    result["truncated"] = len(rows) > row_limit
+                    result["rows"] = [[f"<{len(value)} bytes>" if isinstance(value, bytes) else value for value in row]
+                                      for row in rows[:row_limit]]
+                result["changed"] = max(cursor.rowcount, 0) if result["writes"] else 0
+        except sqlite3.Error as error:
+            result["error"] = str(error)
+        return result
 
     def add_property(self, title: str, kind: str, options: tuple, formula: str) -> dict:
         if not self.is_editable:

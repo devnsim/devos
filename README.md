@@ -8,6 +8,12 @@ Purpose:
 
 # Updates
 
+- **[2026-11-17] Engine plan, Phase 5b: views for every table.**
+  - **Grid:** any table as an editable grid, a page of 200 rows at a time (big databases stay quick). Paste a block of cells from a spreadsheet, copy cells out, add columns (formula columns too). Computed columns show greyed, with their formula on hover.
+  - **Chart:** line, bar or scatter of one or two number columns against numbers, dates or categories; *Totals* sums, averages or counts by X inside the engine.
+  - **Network:** the graph a graph-database table belongs to; click a node to select its row everywhere on the page.
+  - **For files:** a **Sheet** view (cells and formulas, with a formula bar), **SQL** and **Cypher consoles** with history, and **Structure** (columns, keys, indexes, foreign keys, relationships). *New view…* only offers views the chosen data can use.
+  - Views of a file now update when another tool (the Spreadsheet, the Database Editor, the Graph Database) changes it.
 - **[2026-11-17] Engine plan, Phase 5a: the Data engine.**
   - **One way to ask for any table:** record collections (Projects, Agents), your SQLite databases, CSV datasets, workbook sheets and graph databases all answer the same questions, so any view (table, board, timeline, calendar, form) can show any of them. *New view…* lists every table in your Library.
   - **Fast on big tables:** questions run inside the database (SQL for records and databases, Cypher for graphs), and record properties you filter or sort by are indexed.
@@ -106,7 +112,7 @@ devos/
 │   ├── runtime.py                # get_bus(), attach / detach (remembered), capability queries, add_package(); shutdown
 │   ├── kernel/shapes.py, query.py # data shapes v1 (+ Arrow) and Query v1 (docs/shapes.md)
 │   ├── toolkit/                  # shared toolkits: table.py (run_query), series.py, sql.py (Query v1 -> SQL), formulas.py, workbook.py (sheets, xlsx / csv), kuzu_db.py (Kùzu)
-│   ├── data/                     # Data engine: engine.py (requests, sources), records.py (JSON values, formulas), tables.py (SQLite), grids.py (CSV, sheets), graphs.py (Kùzu), common.py
+│   ├── data/                     # Data engine: engine.py (requests, sources), records.py (JSON values, formulas), tables.py (SQLite), grids.py (CSV, sheets), graphs.py (Kùzu), common.py, views.py (Sheet, SQL / Cypher consoles, Structure)
 │   └── knowledge/                # Knowledge engine (core): engine.py (file service, source contract, note links), store.py (library/ + content_items)
 ├── core/                         # native C++20 engine (pybind11 extension "devos_core")
 │   ├── CMakeLists.txt
@@ -358,7 +364,7 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `empty_tab_label` | UI element (`QLabel`) | `TabGroup` | Hint in an empty pane: "Pick a page from the sidebar" (one pane) or "Drag a page here" (split). |
 | record / `RecordCollection` | Concept / class | `app/data/store/records.py` | "Every line is a record with properties": records of one collection in SQLite (JSON values); `get_collection(name, defaults)` shares one per name; users can add properties. |
 | `PropertySpec` | Class | `app/data/store/records.py` | One declared property: key, title, kind (text, long_text, number, select, multi_select, date, checkbox, url), options. |
-| view / view type | Concept | `app/views/` (`types/`: table, board, timeline, calendar, form, document, links) | One way of drawing data of a shape. A view type declares the shapes it draws and its mapping slots; `register_view_type()`. Contract: `docs/views-api.md`. |
+| view / view type | Concept | `app/views/` (`types/`: table, grid, board, timeline, calendar, form, chart, document, links, network) | One way of drawing data of a shape. A view type declares the shapes it draws and its mapping slots; `register_view_type()`. Contract: `docs/views-api.md`. |
 | `ViewHost` | Class (`QWidget`) | `app/views/host.py` | The frame of every view: definition, data (shared subscription), page channels, writes to the engine, record and view menus; a block, a page tile or a Canvas card. |
 | view definition | Concept | `app/views/api.py` | The saved recipe of a view: view type, source, query, mapping, presentation, channels. `make_definition()`, `upgrade_definition()` (old block settings included). |
 | `ChannelHub` / channel | Class / concept | `app/views/channels.py` | Page-wide shared cursors (one hub per page); selection per source; a view can unlink. |
@@ -369,7 +375,13 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `Source` | Class | `engines/data/common.py` | One Data collection: schema, query, get, create, update (returns a diff), duplicate, delete, move, add / remove property; refuses with `not_allowed` and says why. `RecordsSource`, `SqliteTable`, `GridTable`, `NodeTable`. |
 | formula property | Concept | `engines/data/records.py`, `PropertySpec.formula` | A record property computed from the others (`=[Price] * [Quantity]`); read-only, never stored. Sheet columns of formulas are computed fields too. |
 | `compile_query()` / `run_compiled()` | Functions | `engines/toolkit/sql.py` | Query v1 as SQLite SQL (filters, search, sort with empties last, group + aggregates, paging); answers like `run_query()`. |
-| `Engine.ask()` / `EngineManifest.uses` | Method / field | `engines/kernel/engine.py` | One engine asking another it declares in `uses` (Data asks Knowledge for files); `undeclared_use` otherwise. |
+| `Engine.ask()` / `Engine.watch()` / `EngineManifest.uses` | Methods / field | `engines/kernel/engine.py` | One engine asking another it declares in `uses` (Data asks Knowledge for files), or hearing its events: `watch(pattern, handler)` runs the handler on the engine's own thread, between requests, in order. `undeclared_use` otherwise. |
+| `GridView` | View type `grid` | `app/views/types/grid.py` | Any table as an editable grid, paged by the engine (200 rows); copy / paste of cell blocks; + Column (formulas too); computed columns read-only. |
+| `ChartView` | View type `chart` | `app/views/types/chart.py` | Line / bar / scatter of Y (and an optional second Y) against X; dates and categories on X; Totals by X grouped in the engine. |
+| `NetworkView` | View type `network` | `app/views/types/network.py` | The graph a `graph:` table belongs to (`data.graph`); nodes coloured by table; clicking one of the table's nodes selects its row. |
+| `GraphCanvas` | Class (`QWidget`) | `app/views/graph_canvas.py` | Draws nodes and edges with a seeded spring layout; node_clicked / node_activated. Used by the Links and Network views. |
+| `SheetView` / `SqlConsoleView` / `CypherConsoleView` / `StructureView` | View types `sheet`, `sql_console`, `cypher_console`, `structure` | `engines/data/views.py` | The Data engine's own views: cells and formulas; statements with history; how a table is built. |
+| `ViewType.accepts` / `MappingSlot.auto` | Fields | `app/views/api.py` | `accepts(source)`: a view only for some sources (the builder hides it, the host explains). `auto=False`: an optional slot left empty until the user picks a field. |
 | `ENGINE_RENAMES` | Constant (dict) | `app/views/api.py` | Retired engine -> its replacement (`records` -> `data`); saved views are upgraded on load. |
 | `RecordFocus` | Class | `app/modules/source_module.py` | The page's selected record of a source, fetched from the engine (Agents chat, Notes, exports). |
 | `DataViewModule` | Class (`ModuleView`) | `app/modules/data_view/view.py` | "Data view": any view of any source as a page tile or Canvas card. |

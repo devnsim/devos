@@ -9,16 +9,20 @@
 #   1. The source contract (docs/views-api.md) for every collection: collections, schema, query, get,
 #      create, update, duplicate, delete, move, add_property, remove_property.
 #   2. Record collections: register (a module's default properties), export_json; formula properties.
-#   3. graph: a Kùzu database as a Graph shape.
+#   3. graph: a Kùzu database as a Graph shape. For the specialist views: structure, cells / set_cell (sheets),
+#      sql (databases) and cypher (graphs) - consoles that report what they changed.
 #   4. Files come from Knowledge (Engine.ask: list, path, refresh_size); Data never looks into the Library
 #      itself. Without Knowledge, record collections still work.
-#   5. "changed" events: {collection, ids, op, schema, changes: {id: {key: [old, new]}}} (writes, not reads).
+#   5. "changed" events: {collection, ids, op, schema, changes: {id: {key: [old, new]}}} (writes, not reads);
+#      op "external" when another tool changed the file (Engine.watch on "knowledge.changed").
 # CONTRACT:
 #   - Requires: engines.kernel, engines.data (common, records, tables, grids, graphs), app.data.store
 #               (database, records). Own connection on its thread. Uses Knowledge (engine.json "uses").
 #   - Exposes: DataEngine (MANIFEST id "data"), MANIFEST
 #   - Owns: record_collections, record_items, records_adapter_defaults (+ expression indexes on record_items).
 # NOTES:
+#   - [2026-11-17] Phase 5b: structure, cells, set_cell, sql, cypher; graph takes a collection.
+#   - [2026-11-17] Phase 5b: watches knowledge.changed - files changed by other tools refresh their Data views.
 #   - [2026-11-17] Created in Phase 5a of the engine plan (replaces the Phase 2 records engine).
 # ==============================================================================
 
@@ -58,7 +62,7 @@ C = ("collection",)
 W = "writes"
 LISTED_KINDS = {kind: prefix for prefix, kind in FILE_KINDS.items()}
 MANIFEST = EngineManifest(
-    "data", "Data", "0.1", "Tables of every kind: records, your databases, datasets, sheets and graphs.",
+    "data", "Data", "0.2", "Tables of every kind: records, your databases, datasets, sheets and graphs.",
     requests=(
         RequestSpec("collections", "Every table Data can show, with its noun and size", optional=("kinds",),
                     example={"kinds": ["records"]}),
@@ -78,8 +82,15 @@ MANIFEST = EngineManifest(
         RequestSpec("register", "Declare a record collection's default properties", params=C + ("properties",),
                     optional=("noun",), effect=W),
         RequestSpec("export_json", "Every record of a collection as JSON text", params=C),
-        RequestSpec("graph", "A graph database's nodes and relationships (a sample)", params=("item_id",),
+        RequestSpec("graph", "The nodes and relationships of a graph table's database (a sample)", params=C,
                     optional=("limit",), shape="graph"),
+        RequestSpec("structure", "How a collection is built: columns, keys, indexes, relationships", params=C),
+        RequestSpec("cells", "A sheet's cells: what was typed and what shows", params=C),
+        RequestSpec("set_cell", "Type into a sheet cell (formulas too)", params=C + ("row", "col", "raw"), effect=W),
+        RequestSpec("sql", "Run SQL on a table's database (results of each statement)", params=C + ("sql",),
+                    optional=("row_limit",), effect=W, timeout_s=300),
+        RequestSpec("cypher", "Run Cypher on a graph table's database", params=C + ("cypher",), optional=("row_limit",),
+                    effect=W, timeout_s=300),
     ),
     events=("changed",),
     shapes=("table", "graph"),
@@ -101,6 +112,7 @@ class DataEngine(Engine):
         self.database.migrate("records_adapter", MIGRATIONS)    # the Phase 2 name: same table, now Data's
         self._sources: dict[str, Source] = {}
         self._graphs: dict[int, object] = {}
+        self.watch("knowledge.changed", self._library_changed)   # files changed by other tools, renamed, deleted
 
     def stop(self) -> None:
         for source in self._sources.values():
@@ -118,9 +130,25 @@ class DataEngine(Engine):
         ref = parse_collection(source.collection)
         if ref is not None:
             try:
-                self.ask("knowledge.refresh_size", {"item_id": ref.item_id})
+                self.ask("knowledge.refresh_size", {"item_id": ref.item_id, "by": "data"})
             except EngineError as error:
                 self.log("warning", f"The Library didn't hear about the change to {source.title}: {error}")
+    def _library_changed(self, message) -> None:
+        """A Library file changed outside Data (the Spreadsheet saved, the Database Editor edited, it was renamed
+        or deleted): drop what Data holds open for it and tell every view of its tables."""
+        payload = message.payload
+        if payload.get("by") == "data" or payload.get("kind") not in FILE_KINDS.values():
+            return
+        ids = payload.get("ids")
+        touched = [collection for collection in self._sources
+                   if (ref := parse_collection(collection)) is not None and FILE_KINDS[ref.prefix] == payload["kind"]
+                   and (ids is None or ref.item_id in ids)]
+        for collection in touched:
+            self._sources.pop(collection).close()
+        for item_id in [item_id for item_id in self._graphs if ids is None or item_id in ids] if payload["kind"] == "graph" else []:
+            self._graphs.pop(item_id).close()           # reopened on the next question: sees the other tool's writes
+        for collection in touched:
+            self._changed(collection, "external", schema=True)
 # --- END [1.2] ---
 
 # ==============================================================================
@@ -261,9 +289,23 @@ class DataEngine(Engine):
             raise source.refuse("only record collections export as JSON here")
         return {"json": source.export_json()}
 
+    def _file_ref(self, collection: str, prefixes: tuple[str, ...], what: str) -> FileRef:
+        ref = parse_collection(collection)
+        if ref is None or ref.prefix not in prefixes:
+            raise EngineError(f"{what} works on {' / '.join(prefixes)} tables, not “{collection}”", code="not_allowed")
+        return ref
+
     def on_graph(self, payload: dict, _job: Job) -> dict:
         from engines.data.graphs import graph_shape
-        return graph_shape(self._graph(int(payload["item_id"])), int(payload.get("limit") or 300))
+        ref = self._file_ref(payload["collection"], ("graph",), "The graph")
+        return graph_shape(self._graph(ref.item_id), int(payload.get("limit") or 300))
+
+    def on_structure(self, payload: dict, _job: Job) -> dict:
+        return self._source(payload["collection"]).structure()
+
+    def on_cells(self, payload: dict, _job: Job) -> dict:
+        self._file_ref(payload["collection"], ("sheet", "csv"), "The sheet view")
+        return self._source(payload["collection"]).cells()
 # --- END [1.4] ---
 
 # ==============================================================================
@@ -332,6 +374,32 @@ class DataEngine(Engine):
         self._file_written(source)
         self._changed(source.collection, "schema", schema=True)
         return {"field": spec}
+
+    def on_set_cell(self, payload: dict, _job: Job) -> dict:
+        self._file_ref(payload["collection"], ("sheet", "csv"), "Typing into cells")
+        source = self._source(payload["collection"])
+        source.set_cell(int(payload["row"]), int(payload["col"]), str(payload["raw"]))
+        self._file_written(source)
+        self._changed(source.collection, "update", schema=int(payload["row"]) == 0)   # values anywhere may follow
+        return {}
+
+    def _console(self, payload: dict, prefix: str, run) -> dict:
+        ref = self._file_ref(payload["collection"], (prefix,), "This console")
+        source = self._source(payload["collection"])
+        results, wrote = run(source, int(payload.get("row_limit") or 5000))
+        if wrote:
+            self._file_written(source)
+            for collection in [name for name in self._sources if (other := parse_collection(name)) is not None
+                               and other.prefix == prefix and other.item_id == ref.item_id]:
+                self._changed(collection, "external", schema=True)
+            self.log("info", f"Ran {len(results)} statement(s) that changed {source.title}")
+        return {"results": results, "wrote": wrote}
+
+    def on_sql(self, payload: dict, _job: Job) -> dict:
+        return self._console(payload, "db", lambda source, limit: source.sql(payload["sql"], limit))
+
+    def on_cypher(self, payload: dict, _job: Job) -> dict:
+        return self._console(payload, "graph", lambda source, limit: source.cypher(payload["cypher"], limit))
 
     def on_remove_property(self, payload: dict, _job: Job) -> dict:
         source = self._source(payload["collection"])

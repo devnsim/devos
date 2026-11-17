@@ -12,6 +12,7 @@
 #   - Requires: kuzu (engines.toolkit.kuzu_db.GraphDb), engines.data.common, engines.toolkit.table, engines.kernel.
 #   - Exposes: NodeTable(ref, db, title), graph_shape(db, limit), kind_for_kuzu(type_name), KUZU_FOR_KIND
 # NOTES:
+#   - [2026-11-17] Phase 5b: cypher() for the Cypher console, structure(); graph nodes carry their table key (row_id).
 #   - [2026-11-17] Created in Phase 5a of the engine plan.
 # ==============================================================================
 
@@ -262,6 +263,29 @@ class NodeTable(Source):
                       {"id": _kuzu_value(self.kinds[self.key], row[self.key])})
         return [str(row.get(self.title_key)) for row in rows]
 
+    def structure(self) -> dict:
+        try:
+            relations = [{"name": name, "connects": [list(pair) for pair in self.db.connection_of(name)]}
+                         for name in self.db.rel_tables()]
+        except GraphDbError as error:
+            raise EngineError(f"{self.title}: {error}", code="database_error") from None
+        relations = [rel for rel in relations if any(self.ref.table in pair for pair in rel["connects"])]
+        return {**super().structure(), "kind": "node table", "relationships": relations,
+                "rows": int(self._run(f"MATCH (n:{self.table}) RETURN count(*)")[0][0])}
+
+    def cypher(self, script: str, row_limit: int) -> tuple[list[dict], bool]:
+        """Run Cypher on this table's database: (results, did it write); stops at the first error."""
+        from engines.toolkit.kuzu_db import describe
+        results, wrote = [], False
+        for outcome in self.db.run(script):
+            writes = outcome.statement.split()[0].upper() in ("CREATE", "DROP", "ALTER", "MERGE", "DELETE", "SET", "COPY")
+            wrote = wrote or (writes and not outcome.error)
+            results.append({"statement": outcome.statement, "columns": outcome.columns, "error": outcome.error,
+                            "rows": [[describe(value) if isinstance(value, dict) else _plain(value) for value in row]
+                                     for row in outcome.rows[:row_limit]],
+                            "truncated": len(outcome.rows) > row_limit, "changed": 0, "writes": writes})
+        return results, wrote
+
     def add_property(self, title: str, kind: str, options: tuple, formula: str) -> dict:
         if kind not in KUZU_FOR_KIND:
             raise self.refuse(f"a graph property can't be of kind “{kind}”")
@@ -295,16 +319,20 @@ def graph_shape(db: GraphDb, limit: int = 300) -> dict:
         sample = db.graph_sample(limit)
     except GraphDbError as error:
         raise EngineError(str(error), code="database_error") from None
-    nodes = []
+    nodes, keys = [], {}
     for key, node in sample.nodes.items():
         props = {name: _plain(value) for name, value in properties_of(node).items()}
         title = next((str(value) for value in props.values() if isinstance(value, str)), key)
-        nodes.append({"id": key, "title": title, "label": node["_label"], "properties": props})
+        if node["_label"] not in keys:                  # the table's primary key: the node's row id in a table view
+            keys[node["_label"]] = next((name for name, _type, pk in db.columns(node["_label"]) if pk), "")
+        nodes.append({"id": key, "title": title, "label": node["_label"], "row_id": props.get(keys[node["_label"]]),
+                      "properties": props})
     edges = [{"id": f"{element_key(rel['_src'])}-{rel['_label']}-{element_key(rel['_dst'])}",
               "source": element_key(rel["_src"]), "target": element_key(rel["_dst"]), "label": rel["_label"],
               "properties": {name: _plain(value) for name, value in properties_of(rel).items()}}
              for rel in sample.rels]
-    node_fields = [field("title", "Name", "text"), field("label", "Table", "select"), field("properties", "Properties", "json")]
+    node_fields = [field("title", "Name", "text"), field("label", "Table", "select"), field("row_id", "Key", "text"),
+                   field("properties", "Properties", "json")]
     edge_fields = [field("label", "Relationship", "select"), field("properties", "Properties", "json")]
     graph, _attachments = shapes.graph(node_fields, nodes, edge_fields, edges)
     return graph

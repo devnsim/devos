@@ -336,7 +336,7 @@ def test_graph_node_tables_and_graph_shape(database):
     with pytest.raises(EngineError) as needs_key:
         bus.call("data.create", {"collection": f"graph:{item.item_id}/City", "values": {"country": "NL"}})
     assert needs_key.value.code == "invalid_value"
-    graph = bus.call("data.graph", {"item_id": item.item_id})
+    graph = bus.call("data.graph", {"collection": collection})
     assert not shapes.validate(graph) and len(graph["edges"]) >= 10 and {"Person", "City", "Project"} <= {
         node["label"] for node in graph["nodes"]}
 # --- END [2.5] ---
@@ -372,6 +372,78 @@ def test_engines_ask_only_engines_they_declare():
         bus.call("asker.go", {"topic": "knowledge.list"}, timeout_s=5)
     assert undeclared.value.code == "undeclared_use"
     bus.shutdown()
+
+
+def test_engines_watch_engines_they_declare_on_their_own_thread():
+    import threading
+    import time
+
+    from engines.kernel import Bus, Engine, EngineManifest, RequestSpec
+
+    class Talker(Engine):
+        MANIFEST = EngineManifest("talker", "Talker", "1", "Talks", requests=(RequestSpec("say", "Say", params=("n",)),),
+                                  events=("said",))
+
+        def on_say(self, payload, _job):
+            self.emit("said", {"n": payload["n"]})
+            return {}
+
+    class Listener(Engine):
+        MANIFEST = EngineManifest("listener", "Listener", "1", "Listens", requests=(RequestSpec("heard", "Heard"),),
+                                  uses=("talker",))
+
+        def start(self):
+            self.heard, self.threads = [], set()
+            self.watch("talker.said", self._said)
+
+        def _said(self, message):
+            self.heard.append(message.payload["n"])
+            self.threads.add(threading.current_thread().name)
+
+        def on_heard(self, _payload, _job):
+            return {"heard": self.heard, "threads": sorted(self.threads)}
+
+    class Nosy(Engine):
+        MANIFEST = EngineManifest("nosy", "Nosy", "1", "Watches without saying so")
+
+        def start(self):
+            self.watch("talker.said", lambda message: None)
+
+    bus = Bus()
+    for engine in (Talker, Listener, Nosy):
+        bus.register(engine)
+    bus.call("listener.heard", timeout_s=5)                           # started: watching
+    for number in range(20):
+        bus.call("talker.say", {"n": number}, timeout_s=5)
+    deadline = time.time() + 5
+    while len(bus.call("listener.heard", timeout_s=5)["heard"]) < 20 and time.time() < deadline:
+        time.sleep(0.01)
+    answer = bus.call("listener.heard", timeout_s=5)
+    assert answer["heard"] == list(range(20)) and answer["threads"] == ["engine:listener"]   # in order, on its thread
+    with pytest.raises(EngineError) as nosy:
+        bus.call("nosy._health", timeout_s=5)
+    assert nosy.value.code == "start_failed" and "doesn't declare" in str(nosy.value)
+    bus.shutdown()
+
+
+def test_data_hears_files_changed_by_other_tools(database, wait_for):
+    from app.clients.library import library
+    from engines.runtime import get_bus
+    bus, heard = get_bus(), []
+    subscription = bus.subscribe("data.changed", lambda message: heard.append(message.payload))
+    path = library().new_path("database", ".sqlite3")
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE logs (line TEXT)")
+    item = library().register_path("database", unique("P5 watched"), path)
+    collection = f"db:{item.item_id}/logs"
+    bus.call("data.create", {"collection": collection, "title": "by data"})          # Data's own write ...
+    with sqlite3.connect(path) as other_tool:
+        other_tool.execute("INSERT INTO logs VALUES ('by another tool')")
+    library().refresh_size(item.item_id)                              # ... and another tool's, as it reports it
+    assert wait_for(lambda: any(event["op"] == "external" and event["collection"] == collection for event in heard), 5)
+    assert [event["op"] for event in heard if event["collection"] == collection] == ["create", "external"]
+    assert bus.call("data.query", {"collection": collection})["total"] == 2
+    subscription.unsubscribe()
 
 
 def test_saved_record_views_move_to_data_and_file_tables_show_in_views(qapp, database, wait_for):

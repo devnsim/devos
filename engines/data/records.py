@@ -17,6 +17,7 @@
 #   - Exposes: RecordsSource(database, name, defaults, noun), record_row(record), ensure_indexes(database,
 #              properties), check_formula(formula, properties), MIGRATIONS (records_adapter_defaults)
 # NOTES:
+#   - [2026-11-17] Phase 5b: structure() names it a record collection.
 #   - [2026-11-17] Created in Phase 5a of the engine plan (from the Phase 2 records engine, which it replaces).
 # ==============================================================================
 
@@ -282,6 +283,9 @@ class RecordsSource(Source):
         if spec is None or not spec.is_user:
             raise EngineError("Only properties you added can be removed", code="not_allowed")
         self.records.remove_property(spec.key)
+
+    def structure(self) -> dict:
+        return {**super().structure(), "kind": "records", "noun": self.noun}
 
     def export_json(self) -> str:
         return self.records.to_json()

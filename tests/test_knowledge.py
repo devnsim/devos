@@ -11,6 +11,7 @@
 #               app.ui.engine_bridge, app.views, app.modules (notes, library), tools/check_standard.py
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] The Links view draws on GraphCanvas (Phase 5b): clicks go to view.canvas.
 #   - [2026-11-17] Phase 5a: records sources are the Data engine's.
 #   - [2026-11-17] Created in Phase 4 of the engine plan.
 # ==============================================================================
@@ -226,10 +227,10 @@ def test_links_view_draws_notes_and_selects_them(qapp, database, wait_for):
     assert wait_for(lambda: host.view is not None and any(node["id"] == target.item_id for node in host.view.nodes), 5)
     view = host.view
     assert "links" in view.summary_label.text() and view.grab().width() > 0          # paints without errors
-    point = view._point(target.item_id)
+    point = view.canvas.point_of(target.item_id)
     press = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(point), QPointF(view.mapToGlobal(point.toPoint())),
                         Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
-    view.mousePressEvent(press)
+    view.canvas.mousePressEvent(press)
     assert host.selected_id == target.item_id
     store.delete(target.item_id)
     assert wait_for(lambda: all(node["id"] != target.item_id for node in view.nodes), 5)   # follows changes

@@ -18,6 +18,8 @@
 #              view_types(), TableData, default_mapping(), make_definition(), upgrade_definition(), source_key(),
 #              tag_color(), field_text(), parse_date(), RECORD_MIME, start_record_drag(), dragged_record_id()
 # NOTES:
+#   - [2026-11-17] MappingSlot.auto; optional slots never reuse a field another slot took (a chart drew Y twice).
+#   - [2026-11-17] Phase 5b: ViewType.accepts(source) / can_show() - a view for some sources only (the SQL console: databases).
 #   - [2026-11-17] Phase 5a: upgrade_definition maps sources of the retired records engine to the Data engine (ENGINE_RENAMES).
 #   - [2026-11-17] field_text(): byte sizes and date-times read naturally (Library tables).
 #   - [2026-11-17] Phase 3: ViewType.engine; views shipped by engines load with them and leave when they detach.
@@ -80,6 +82,7 @@ class MappingSlot:
     kinds: tuple[str, ...]
     required: bool = False
     description: str = ""
+    auto: bool = True                                # filled with a fitting field when nobody chose one
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,10 @@ class ViewType:
     api_version: int = API_VERSION
     engine: str = ""                                 # the engine that ships this view ("" = built into DevOS)
     requests: tuple[str, ...] = ()                   # requests the source engine must answer ("read_text" ...)
+    accepts: Callable[[dict], bool] | None = None    # accepts(source) -> can this view show it (None: any source)
+
+    def can_show(self, source: dict) -> bool:
+        return self.accepts is None or bool(self.accepts(source))
 
 
 _view_types: dict[str, ViewType] = {}
@@ -179,9 +186,12 @@ def default_mapping(view: ViewType, fields: list[dict], mapping: dict | None = N
     for slot in view.slots:
         if slot.key in chosen:
             continue
+        if not slot.auto and not slot.required:
+            chosen[slot.key] = None                    # only when the user picks one (a chart's second Y)
+            continue
         candidates = [field["key"] for field in fields if field["kind"] in slot.kinds]
         fresh = [key for key in candidates if key not in used]
-        chosen[slot.key] = (fresh or candidates or [None])[0]
+        chosen[slot.key] = (fresh or (candidates if slot.required else []) or [None])[0]   # optional: never a reused field
         if chosen[slot.key]:
             used.add(chosen[slot.key])
     return chosen

@@ -13,6 +13,7 @@
 #   - Exposes: ViewBuilderDialog(parent, definition) with definition(), source_combo, type_list, slot_combos,
 #              filter_bar, preview
 # NOTES:
+#   - [2026-11-17] Phase 5b: also hides view types that can't show the chosen data (ViewType.accepts).
 #   - [2026-11-17] Only view types the chosen data can serve are shown (ViewType.requests, Phase 4).
 #   - [2026-11-17] Phase 3: sources come from every attached engine following the source contract.
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
@@ -187,7 +188,8 @@ class ViewBuilderDialog(QDialog):
         for index in range(self.type_list.count()):
             item = self.type_list.item(index)
             needs = item.data(Qt.ItemDataRole.UserRole + 1) or ()
-            item.setHidden(any(manifest.request(name) is None for name in needs))
+            kind = view_type(item.data(Qt.ItemDataRole.UserRole))
+            item.setHidden(any(manifest.request(name) is None for name in needs) or kind is None or not kind.can_show(source))
         current = self.type_list.currentItem()
         if current is None or current.isHidden():
             visible = [self.type_list.item(i) for i in range(self.type_list.count()) if not self.type_list.item(i).isHidden()]
