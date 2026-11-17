@@ -16,6 +16,7 @@
 #              new_workbook(), import_file(), export_as(extension), selection_changed, sheet_changed;
 #              SheetModel, GridBlock, SelectionBlock, ChartBlock
 # NOTES:
+#   - [2026-11-17] Imports the workbook and formula logic from engines/toolkit/ (moved there in Phase 5a; the Data engine shares it).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created. Formulas are DevOS's own (formulas.py); .xlsx keeps formulas as text so Excel /
 #                  LibreOffice recompute them on open.
@@ -63,10 +64,10 @@ from PySide6.QtWidgets import (
 from app.data.activity_log import get_activity_log
 from app.clients.library import library
 from app.modules.base import ModuleView
-from app.modules.spreadsheet.engine import (
+from engines.toolkit.workbook import (
     Sheet, SpreadsheetError, Workbook, format_value, has_openpyxl, libreoffice_path,
 )
-from app.modules.spreadsheet.formulas import column_name
+from engines.toolkit.formulas import column_name
 from app.ui.canvas.block_canvas import BlockSpec
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.plot_tools import styled_plot

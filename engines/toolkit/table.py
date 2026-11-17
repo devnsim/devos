@@ -10,8 +10,10 @@
 #      case-insensitively; empty values always sort last.
 # CONTRACT:
 #   - Requires: engines.kernel.query (validate_query). Standard library only.
-#   - Exposes: run_query(rows, fields, question), matches(row, node, kinds), sort_rows(rows, sort, kinds)
+#   - Exposes: run_query(rows, fields, question, title_key, key), matches(row, node, kinds), sort_rows(rows, sort, kinds)
 # NOTES:
+#   - [2026-11-17] Grouped rows sort by their aggregates as numbers.
+#   - [2026-11-17] run_query(key=...): rows keyed by something other than "id" (Data engine file tables).
 #   - [2026-11-17] Created in Phase 2 of the engine plan (first shape toolkit).
 # ==============================================================================
 
@@ -136,11 +138,12 @@ def _aggregate(rows: list[dict], aggregates: list[dict], kinds: dict[str, str]) 
     return result
 
 
-def run_query(rows: list[dict], fields: list[dict], question: dict, title_key: str = "title") -> tuple[list[dict], int, list[dict]]:
+def run_query(rows: list[dict], fields: list[dict], question: dict, title_key: str = "title",
+              key: str = "id") -> tuple[list[dict], int, list[dict]]:
     """(page rows, rows matching before paging, fields of the result). Grouping replaces the rows by one
-    row per group (group fields + aggregates)."""
+    row per group (group fields + aggregates). `key` is the rows' id field (kept when `fields` narrows)."""
     kinds = {field["key"]: field["kind"] for field in fields}
-    problems = validate_query(question, set(kinds) | {title_key, "id"})
+    problems = validate_query(question, set(kinds) | {title_key, "id", key})
     if problems:
         raise EngineError(f"Bad query: {'; '.join(problems)}", code="bad_query")
     kinds.setdefault(title_key, "text")
@@ -161,6 +164,7 @@ def run_query(rows: list[dict], fields: list[dict], question: dict, title_key: s
         aggregates = question.get("aggregates") or [{"op": "count"}]
         selected = [{"id": "|".join(values), **dict(zip(question["group_by"], values)), **_aggregate(members, aggregates, kinds)}
                     for values, members in groups.items()]
+        kinds.update({next(iter(_aggregate([], [item], kinds))): "number" for item in aggregates})   # totals sort as numbers
         result_fields = [field for field in fields if field["key"] in question["group_by"]] + \
             [{"key": next(iter(_aggregate([], [item], kinds))), "title": item["op"].capitalize(), "kind": "number",
               "options": [], "unit": ""} for item in aggregates]
@@ -170,7 +174,7 @@ def run_query(rows: list[dict], fields: list[dict], question: dict, title_key: s
     limit = question.get("limit")
     page = selected[offset:offset + limit] if limit is not None else selected[offset:]
     if question.get("fields"):
-        keep = set(question["fields"]) | {"id", title_key}
+        keep = set(question["fields"]) | {"id", key, title_key}
         page = [{key: value for key, value in row.items() if key in keep} for row in page]
         result_fields = [field for field in result_fields if field["key"] in keep]
     return page, total, result_fields

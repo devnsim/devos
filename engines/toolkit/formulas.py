@@ -1,8 +1,9 @@
 # ==============================================================================
-# FILE: app/modules/spreadsheet/formulas.py
+# FILE: engines/toolkit/formulas.py
 # OVERVIEW: A small, safe spreadsheet formula language (no eval): numbers, text, cell references (A1,
 #           $B$2), ranges (A1:C9), + - * / ^ % & and comparisons, and common functions (SUM, AVERAGE,
-#           IF, ROUND ...). Used by the Spreadsheet module and the Calculator tool.
+#           IF, ROUND ...), and field references [Field name] for computed fields. Used by the Data engine
+#           (computed fields, workbooks), the Spreadsheet module and the Calculator tool.
 # PURPOSE:
 #   1. tokenize() -> parse() -> an expression tree; evaluate(tree, resolver) computes it.
 #   2. evaluate_expression(text): a formula without cell references (the Calculator).
@@ -10,9 +11,12 @@
 # CONTRACT:
 #   - Requires: nothing outside the standard library. No Qt.
 #   - Exposes: FormulaError, tokenize(text), parse(text), evaluate(tree, resolver), evaluate_expression(text),
-#              FUNCTIONS, column_name(index), column_index(letters), parse_cell(ref) -> (row, col)
-#   - resolver: object with cell(row, col) -> value and cells(row1, col1, row2, col2) -> list of values.
+#              field_references(text), FUNCTIONS, column_name(index), column_index(letters), parse_cell(ref) -> (row, col)
+#   - resolver: object with cell(row, col) -> value and cells(row1, col1, row2, col2) -> list of values;
+#     field(name) -> value for [Field name] references (optional: without it they are #REF!).
+#   - Exposes also: field_references(text) -> the field names a formula uses.
 # NOTES:
+#   - [2026-11-17] Moved from app/modules/spreadsheet/formulas.py (Phase 5a: the Data engine shares it); [Field name] references.
 #   - [2026-11-16] Created with the Spreadsheet module.
 # ==============================================================================
 
@@ -83,6 +87,7 @@ _TOKEN = re.compile(r"""
     (?P<space>\s+)
   | (?P<number>\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)
   | (?P<string>"(?:[^"]|"")*")
+  | (?P<field>\[[^\[\]]+\])
   | (?P<range>\$?[A-Za-z]{1,3}\$?\d+:\$?[A-Za-z]{1,3}\$?\d+)
   | (?P<ref>\$[A-Za-z]{1,3}\$?\d+|[A-Za-z]{1,3}\$\d+)
   | (?P<name>[A-Za-z_][A-Za-z0-9_.]*\$?\d*)
@@ -186,6 +191,8 @@ class _Parser:
             return ("string", value[1:-1].replace('""', '"'))
         if kind == "ref":
             return ("ref", *parse_cell(value))
+        if kind == "field":
+            return ("field", value[1:-1].strip())
         if kind == "range":
             first, second = value.split(":")
             (row1, col1), (row2, col2) = parse_cell(first), parse_cell(second)
@@ -322,6 +329,10 @@ def evaluate(tree, resolver):
         return tree[1]
     if kind == "ref":
         return resolver.cell(tree[1], tree[2])
+    if kind == "field":
+        if not hasattr(resolver, "field"):
+            raise FormulaError("#REF!", f"[{tree[1]}] only works in a computed field")
+        return resolver.field(tree[1])
     if kind == "range":
         return resolver.cells(*tree[1:])
     if kind == "negate":
@@ -381,6 +392,23 @@ class _NoCells:
 
     def cells(self, *_bounds):
         raise FormulaError("#REF!", "no cells here")
+
+
+def field_references(text: str) -> list[str]:
+    """The [Field name]s a formula uses, each once, in order (FormulaError if it doesn't parse)."""
+    names: list[str] = []
+
+    def walk(tree) -> None:
+        if tree[0] == "field" and tree[1] not in names:
+            names.append(tree[1])
+        for part in tree[1:]:
+            if isinstance(part, tuple):
+                walk(part)
+            elif isinstance(part, list):
+                for item in part:
+                    walk(item)
+    walk(parse(text))
+    return names
 
 
 def evaluate_expression(text: str):

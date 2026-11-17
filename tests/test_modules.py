@@ -11,6 +11,7 @@
 #               manifold3d, openpyxl (shell.nix)
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Spreadsheet / graph database logic is imported from engines/toolkit/ (moved in Phase 5a).
 #   - [2026-11-17] Record views test goes through the records engine and ViewHosts (Phase 2).
 #   - [2026-11-16] Created with the records model, toolbars and nine new modules.
 # ==============================================================================
@@ -68,8 +69,8 @@ def test_record_collection(qapp, database):
 
 
 def test_formulas():
-    from app.modules.spreadsheet.engine import Sheet
-    from app.modules.spreadsheet.formulas import column_index, column_name, evaluate_expression
+    from engines.toolkit.workbook import Sheet
+    from engines.toolkit.formulas import column_index, column_name, evaluate_expression
     assert evaluate_expression("2*(3+4)^2/7") == 14 and evaluate_expression("ROUND(PI(), 3)") == 3.142
     assert evaluate_expression('IF(2>1, "yes", 1/0)') == "yes"                 # IF skips the unused branch
     assert column_name(27) == "AB" and column_index("AB") == 27
@@ -85,7 +86,7 @@ def test_formulas():
 
 
 def test_workbook_files(tmp_path):
-    from app.modules.spreadsheet.engine import Sheet, Workbook
+    from engines.toolkit.workbook import Sheet, Workbook
     sheet = Sheet("Data")
     sheet.set_raw(0, 0, "x")
     sheet.set_raw(1, 0, "2")
@@ -114,7 +115,7 @@ def test_monitor_insights():
 
 
 def test_graph_db_engine(tmp_path):
-    from app.modules.graph_db.engine import GraphDb, describe, split_statements
+    from engines.toolkit.kuzu_db import GraphDb, describe, split_statements
     assert split_statements("RETURN 'a;b'; RETURN 1") == ["RETURN 'a;b'", "RETURN 1"]
     graph = GraphDb(tmp_path / "g.kuzu")
     graph.load_sample_data()

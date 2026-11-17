@@ -10,10 +10,12 @@
 #   3. emit(event, payload) publishes a declared event; log(level, text) reaches the System Log through
 #      the bus ("<engine>.log" events), so engines never import the app's log.
 #   4. Job: the request being handled; long handlers check job.is_cancelled() and stop early.
+#   5. ask(topic, payload): ask an engine named in MANIFEST.uses and wait (never one that asks back: no cycles).
 # CONTRACT:
 #   - Requires: engines.kernel.messages. Standard library only.
-#   - Exposes: Engine (MANIFEST, start, stop, health, emit, log, handler), Job, Reply, LOG_LEVELS
+#   - Exposes: Engine (MANIFEST, start, stop, health, emit, log, ask, handler), Job, Reply, LOG_LEVELS, ASK_TIMEOUT_S
 # NOTES:
+#   - [2026-11-17] Phase 5a: Engine.ask(topic, payload) - ask an engine declared in MANIFEST.uses (Data asks Knowledge for files).
 #   - [2026-11-17] Phase 3: Job credit (stream back-pressure: take_credit / add_credit).
 #   - [2026-11-17] Created in Phase 1 of the engine plan.
 # ==============================================================================
@@ -22,6 +24,7 @@
 # [DEFINITIONS]
 # - handler: Method on_<request name> (dots become underscores) answering one request.
 # - LOG_LEVELS: Levels an engine may log at ("debug", "info", "success", "warning", "error").
+# - ASK_TIMEOUT_S (float | s): Default limit for Engine.ask (default: 30; shorter than a request's own 60 s).
 # ==============================================================================
 
 # ==============================================================================
@@ -43,6 +46,7 @@ from typing import Any, Callable
 from engines.kernel.messages import EngineError, EngineManifest, Message
 
 LOG_LEVELS = ("debug", "info", "success", "warning", "error")
+ASK_TIMEOUT_S = 30.0
 
 
 @dataclass
@@ -98,10 +102,24 @@ class Engine:
 
     def __init__(self) -> None:
         self._publish: Callable[[Message], None] | None = None
+        self._ask: Callable[..., dict] | None = None
 
-    def attach(self, publish: Callable[[Message], None]) -> None:
-        """Called by the host: where this engine's events go."""
+    def attach(self, publish: Callable[[Message], None], ask: Callable[..., dict] | None = None) -> None:
+        """Called by the host: where this engine's events go, and how it asks other engines."""
         self._publish = publish
+        self._ask = ask
+
+    def ask(self, topic: str, payload: dict | None = None, attachments: dict | None = None,
+            timeout_s: float = ASK_TIMEOUT_S) -> dict:
+        """Ask another engine (one declared in MANIFEST.uses) and wait for its answer's payload. Raises
+        EngineError: its own failures, "undeclared_use", or "not_attached" when it isn't there - so callers
+        can carry on without it."""
+        target = topic.split(".", 1)[0]
+        if target not in self.MANIFEST.uses or target == self.MANIFEST.engine_id:
+            raise EngineError(f"{self.MANIFEST.title} doesn't declare that it uses “{target}”", code="undeclared_use")
+        if self._ask is None:
+            raise EngineError(f"{target} isn't reachable from here", code="not_attached")
+        return self._ask(topic, payload or {}, attachments, timeout_s)
 
     def start(self) -> None:
         """Hook: open stores and connections (runs on the engine's thread)."""

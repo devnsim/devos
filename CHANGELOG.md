@@ -4,6 +4,29 @@ All notable changes to DevOS. Versions follow [Semantic Versioning](https://semv
 Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
+### Added
+- Engine plan Phase 5a (Data engine, `engines/data/`):
+  - One source contract for record collections, user SQLite databases (`db:<item>/<table>`), CSV datasets
+    (`csv:<item>`), workbook sheets (`sheet:<item>/<sheet>`) and Kùzu node tables (`graph:<item>/<table>`);
+    `collections` lists every table in the Library; `graph` returns a database as a Graph shape.
+  - Query v1 runs where the data lives: SQLite (`engines/toolkit/sql.py`, also for records through
+    `json_extract` + expression indexes), Cypher for Kùzu, in memory for CSV / sheets and formula questions.
+  - Formula properties (`=[Price] * [Quantity]`; `[Field]` references in the formula language); sheet columns of
+    formulas are computed fields.
+  - Writes checked by field kind; `changed` events with `op` and per-row diffs; update replies carry `changes`.
+  - `Engine.ask()` and `EngineManifest.uses` (the kit checks engine.json lists them).
+  - `tests/test_data_engine.py` (SQL pushdown compared with the memory toolkit on 18 questions, every source).
+
+### Changed
+- Record collections moved from the records engine to the Data engine (same tables); saved views are upgraded
+  (`ENGINE_RENAMES`); RecordsModule, the Data view module and tests use `data.*`.
+- `formulas.py`, the spreadsheet workbook logic and `GraphDb` moved to `engines/toolkit/` (shared by the Data
+  engine and the modules).
+- Grouped questions may sort by their aggregates, which sort as numbers (memory toolkit too).
+- New rows are selected by the reply's `id` (file tables key rows by `_rowid`).
+
+### Removed
+- The Phase 2 records engine (`engines/records/`).
 
 ## [0.2.0] - 2026-11-17
 Engine plan Phases 0–4: safety net, kernel, view runtime, docking, Knowledge engine.

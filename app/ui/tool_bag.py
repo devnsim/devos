@@ -19,6 +19,7 @@
 #              search_tools(text, module_type_id), run_tool(spec, module_view), ToolBagPopup,
 #              note_pressed(widget), active_module(), module_type_of(widget), main_window()
 # NOTES:
+#   - [2026-11-17] Calculator imports evaluate_expression from engines.toolkit.formulas (moved in Phase 5a).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-17] Global tool "Bus inspector" (engine plan Phase 3).
 #   - [2026-11-17] Global tool "Back up data" (app.data.store.backup, off the UI thread).
@@ -239,7 +240,7 @@ class ToolBagPopup(QFrame):
 # [3.1] global_tools
 # ==============================================================================
 def _calculator(_module_view) -> None:
-    from app.modules.spreadsheet.formulas import evaluate_expression
+    from engines.toolkit.formulas import evaluate_expression
     dialog = QDialog(main_window(), windowTitle="Calculator")
     layout = QVBoxLayout(dialog)
     expression_edit = QLineEdit(placeholderText="e.g. 2*(3+4)^2 / 7, SQRT(2), ROUND(PI()*3, 2)")

@@ -21,6 +21,7 @@
 #              manifests(), is_running(), request(), call(), stream(), subscribe(), publish(), stats(), health(),
 #              add_tap(), remove_tap(), shutdown(); StreamHandle (cancel, ack); Subscription; REQUEST_TIMEOUT_S
 # NOTES:
+#   - [2026-11-17] Phase 5a: hosts get ask= (Engine.ask goes through request(), so it is tapped, timed and counted).
 #   - [2026-11-17] Phase 3: detach / not_attached, request timeouts (watchdog), stream windows + credit, per-engine
 #                  stats, taps for the bus inspector, health(). Rewritten around one _Pending record per request.
 #   - [2026-11-17] Created in Phase 1 of the engine plan.
@@ -187,7 +188,7 @@ class Bus:
                 engine_class = self._engines.get(engine_id)
             if engine_class is None:
                 self.manifest(engine_id)
-            host = self.host_class(engine_class, self._deliver)
+            host = self.host_class(engine_class, self._deliver, ask=self._ask)
             host.start()                              # raises EngineError when the engine can't start
             with self._lock:
                 self._hosts[engine_id] = host
@@ -239,6 +240,10 @@ class Bus:
         future: Future = Future()
         self._send_request(topic, payload, attachments, _Pending(future=future), False, timeout_s)
         return future
+
+    def _ask(self, topic: str, payload: dict, attachments: dict | None, timeout_s: float) -> dict:
+        """Engine.ask: one engine asking another (from its own thread; the answer comes from the other's)."""
+        return self.request(topic, payload, attachments, timeout_s=timeout_s).result().payload
 
     def call(self, topic: str, payload: dict | None = None, timeout_s: float | None = None) -> dict:
         """Blocking request for scripts and tests: the reply payload (EngineError on failure). Without timeout_s

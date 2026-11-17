@@ -18,6 +18,7 @@
 #              view_types(), TableData, default_mapping(), make_definition(), upgrade_definition(), source_key(),
 #              tag_color(), field_text(), parse_date(), RECORD_MIME, start_record_drag(), dragged_record_id()
 # NOTES:
+#   - [2026-11-17] Phase 5a: upgrade_definition maps sources of the retired records engine to the Data engine (ENGINE_RENAMES).
 #   - [2026-11-17] field_text(): byte sizes and date-times read naturally (Library tables).
 #   - [2026-11-17] Phase 3: ViewType.engine; views shipped by engines load with them and leave when they detach.
 #   - [2026-11-17] Created in Phase 2 of the engine plan (helpers moved here from app/ui/record_views.py).
@@ -30,7 +31,8 @@
 #   automatically from field kinds, changeable by the user.
 # - view definition (dict): {version, view_type, title, source {engine, ...}, query, mapping, presentation,
 #   channels {selection: "linked" | "unlinked"}}.
-# - source (dict): Where the data comes from: {"engine": "records", "collection": "projects"}.
+# - source (dict): Where the data comes from: {"engine": "data", "collection": "projects"}.
+# - ENGINE_RENAMES (dict): Retired engine id -> the engine that serves its collections now (records -> data).
 # ==============================================================================
 
 # ==============================================================================
@@ -200,6 +202,9 @@ _LEGACY = {"group_key": ("mapping", "group"), "start_key": ("mapping", "start"),
            "color_key": ("mapping", "color"), "date_key": ("mapping", "date"), "day_px": ("presentation", "day_px")}
 
 
+ENGINE_RENAMES = {"records": "data"}          # engines replaced by another with the same collections
+
+
 def upgrade_definition(state: dict | None, default: dict) -> dict:
     """A saved block state as a current definition. States saved before Phase 2 (group_key, start_key,
     sort_key ...) keep their meaning; anything unreadable falls back to `default`."""
@@ -210,6 +215,8 @@ def upgrade_definition(state: dict | None, default: dict) -> dict:
         merged = {**definition, **copy.deepcopy(state)}
         for part in ("query", "mapping", "presentation", "channels", "source"):
             merged[part] = dict(state.get(part) or definition.get(part) or {})
+        if merged["source"].get("engine") in ENGINE_RENAMES:            # views saved before the engine moved
+            merged["source"]["engine"] = ENGINE_RENAMES[merged["source"]["engine"]]
         merged["version"] = DEFINITION_VERSION
         return merged
     for old_key, (part, new_key) in _LEGACY.items():

@@ -11,6 +11,7 @@
 #               app.ui.engine_bridge, app.views, app.modules (notes, library), tools/check_standard.py
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 5a: records sources are the Data engine's.
 #   - [2026-11-17] Created in Phase 4 of the engine plan.
 # ==============================================================================
 
@@ -239,7 +240,7 @@ def test_links_view_draws_notes_and_selects_them(qapp, database, wait_for):
 def test_views_say_when_their_data_cant_serve_them(qapp, database):
     from app.views.api import make_definition
     from app.views.host import ViewHost
-    host = ViewHost(make_definition("document", {"engine": "records", "collection": "projects"}))
+    host = ViewHost(make_definition("document", {"engine": "data", "collection": "projects"}))
     assert host.view is None and "read_text" in host.view_message_label.text()
     host.deleteLater()
 # --- END [2.4] ---
@@ -310,7 +311,7 @@ def test_app_never_imports_engine_internals():
     sys.path.insert(0, str(ROOT / "tools"))
     from check_standard import boundary_errors
     assert boundary_errors("app/modules/notes/view.py", ["from engines.knowledge.store import ContentStore"])
-    assert boundary_errors("app/ui/main_window.py", ["import engines.records.engine"])
+    assert boundary_errors("app/ui/main_window.py", ["import engines.data.engine"])
     assert not boundary_errors("app/clients/library.py", ["from engines.kernel import EngineError",
                                                           "from engines.runtime import get_bus",
                                                           "from engines.toolkit.table import run_query"])

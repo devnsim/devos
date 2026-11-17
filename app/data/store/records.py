@@ -5,8 +5,8 @@
 #           users can add their own properties; every view (table, board, timeline, calendar, form) reads
 #           the same records.
 # PURPOSE:
-#   1. PropertySpec: one declared property (key, title, kind, options). Kinds: text, long_text, number,
-#      select, multi_select, date, checkbox, url.
+#   1. PropertySpec: one declared property (key, title, kind, options, formula). Kinds: text, long_text, number,
+#      select, multi_select, date, checkbox, url, formula (computed by the Data engine; never stored).
 #   2. RecordCollection: list / search / sort / create / update / duplicate / delete / reorder records;
 #      user-added properties stored with the collection; listeners so every open view stays in sync.
 #   3. Value helpers: coerce_value() (text from an editor -> stored value), display_text().
@@ -17,6 +17,7 @@
 #   - Tables (namespace "records"): record_collections, record_items. Values are JSON per record, so a
 #     new property never needs a schema migration.
 # NOTES:
+#   - [2026-11-17] Phase 5a: "formula" property kind (PropertySpec.formula; values computed, never stored).
 #   - [2026-11-16] Created to explore the "everything is a database" model with the Agents and Projects
 #                  modules. Deliberately self-contained (two tables, JSON values): pages and other modules
 #                  are not moved onto it until the data layer is designed.
@@ -75,7 +76,7 @@ MIGRATIONS = [
     CREATE INDEX record_items_collection ON record_items (collection, position);
     """,
 ]
-PROPERTY_KINDS = ("text", "long_text", "number", "select", "multi_select", "date", "checkbox", "url")
+PROPERTY_KINDS = ("text", "long_text", "number", "select", "multi_select", "date", "checkbox", "url", "formula")
 TITLE_KEY = "title"
 DATE_FORMAT = "%Y-%m-%d"
 # --- END [1.1] ---
@@ -91,6 +92,7 @@ class PropertySpec:
     kind: str = "text"
     options: tuple[str, ...] = ()               # select / multi_select choices (users may type new ones)
     is_user: bool = False                       # added by the user (removable)
+    formula: str = ""                           # kind "formula": computed from the record ([Field] references)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -100,7 +102,7 @@ class PropertySpec:
     @staticmethod
     def from_dict(data: dict) -> "PropertySpec":
         return PropertySpec(str(data["key"]), str(data.get("title") or data["key"]), str(data.get("kind", "text")),
-                            tuple(data.get("options") or ()), bool(data.get("is_user", False)))
+                            tuple(data.get("options") or ()), bool(data.get("is_user", False)), str(data.get("formula") or ""))
 
 
 @dataclass
@@ -121,6 +123,8 @@ class Record:
 # ==============================================================================
 def coerce_value(spec: PropertySpec, value):
     """Editor value -> stored value (None = empty). Raises ValueError for text that doesn't fit the kind."""
+    if spec.kind == "formula":
+        raise ValueError("it is computed from its formula")
     if spec.kind == "checkbox":
         return bool(value)
     if spec.kind == "multi_select":
@@ -190,7 +194,7 @@ class RecordCollection:
             return PropertySpec(TITLE_KEY, "Name")
         return next((spec for spec in self.properties if spec.key == key), None)
 
-    def add_property(self, title: str, kind: str, options: tuple[str, ...] = ()) -> PropertySpec:
+    def add_property(self, title: str, kind: str, options: tuple[str, ...] = (), formula: str = "") -> PropertySpec:
         if kind not in PROPERTY_KINDS:
             raise ValueError(f"unknown property kind {kind!r}")
         title = title.strip()
@@ -201,7 +205,9 @@ class RecordCollection:
         key, number = base, 2
         while key in keys:
             key, number = f"{base}_{number}", number + 1
-        spec = PropertySpec(key, title, kind, tuple(options), is_user=True)
+        if kind == "formula" and not formula.strip():
+            raise ValueError("a formula property needs a formula")
+        spec = PropertySpec(key, title, kind, tuple(options), is_user=True, formula=formula.strip())
         self._user_properties.append(spec)
         self._save_properties()
         return spec
@@ -214,7 +220,7 @@ class RecordCollection:
     def add_option(self, key: str, option: str) -> None:
         """Remember a new select option typed by the user (user properties only; defaults are fixed)."""
         self._user_properties = [
-            PropertySpec(spec.key, spec.title, spec.kind, spec.options + (option,), True)
+            PropertySpec(spec.key, spec.title, spec.kind, spec.options + (option,), True, spec.formula)
             if spec.key == key and option not in spec.options else spec
             for spec in self._user_properties]
         self._save_properties()

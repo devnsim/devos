@@ -8,6 +8,11 @@ Purpose:
 
 # Updates
 
+- **[2026-11-17] Engine plan, Phase 5a: the Data engine.**
+  - **One way to ask for any table:** record collections (Projects, Agents), your SQLite databases, CSV datasets, workbook sheets and graph databases all answer the same questions, so any view (table, board, timeline, calendar, form) can show any of them. *New view…* lists every table in your Library.
+  - **Fast on big tables:** questions run inside the database (SQL for records and databases, Cypher for graphs), and record properties you filter or sort by are indexed.
+  - **Formula properties:** add a property computed from the others, like `=[Price] * [Quantity]`. Sheet columns made of formulas show as computed too.
+  - **Edits are checked and kept in the file:** a number stays a number, formula cells and a node's key can't be overwritten, and Excel files keep their formatting. Every change is announced with what changed.
 - **[2026-11-17] Engine plan, Phase 4: the Knowledge engine owns your Library.**
   - **One owner:** notes, datasets, captures, CAD models, databases and every other file DevOS keeps for you are stored, found, renamed and deleted only by the Knowledge engine. Modules and tools ask it, and hear about changes the moment they happen.
   - **Notes** and **Library** are now made of views: a list or any other view of your files, and a **Document** view (Markdown with live preview, autosaved; text files and datasets shown as text). Add more with *New view…*, for example a board of the Library grouped by kind.
@@ -100,8 +105,8 @@ devos/
 │   ├── kernel/packages.py, conformance.py # engine packages (engine.json, discovery, loading); the conformance kit
 │   ├── runtime.py                # get_bus(), attach / detach (remembered), capability queries, add_package(); shutdown
 │   ├── kernel/shapes.py, query.py # data shapes v1 (+ Arrow) and Query v1 (docs/shapes.md)
-│   ├── toolkit/                  # shape toolkits: table.py (run_query), series.py (window, resample, decimate)
-│   ├── records/engine.py         # records engine (temporary until the Data engine): collections as Table shapes
+│   ├── toolkit/                  # shared toolkits: table.py (run_query), series.py, sql.py (Query v1 -> SQL), formulas.py, workbook.py (sheets, xlsx / csv), kuzu_db.py (Kùzu)
+│   ├── data/                     # Data engine: engine.py (requests, sources), records.py (JSON values, formulas), tables.py (SQLite), grids.py (CSV, sheets), graphs.py (Kùzu), common.py
 │   └── knowledge/                # Knowledge engine (core): engine.py (file service, source contract, note links), store.py (library/ + content_items)
 ├── core/                         # native C++20 engine (pybind11 extension "devos_core")
 │   ├── CMakeLists.txt
@@ -142,8 +147,8 @@ devos/
 │   │   ├── data_view/            # Data view module: any view of any source as a page tile / Canvas card
 │   │   ├── agents/               # record module + chat: engine.py (Claude / Gemini / Ollama), store.py (chats), blocks.py (Chat), view.py
 │   │   ├── projects/             # record module: view.py
-│   │   ├── spreadsheet/          # formulas.py (no eval), engine.py (sheets, xlsx / csv, LibreOffice), view.py
-│   │   ├── graph_db/             # Kùzu graph databases: engine.py, view.py
+│   │   ├── spreadsheet/          # Spreadsheet: view.py (logic in engines/toolkit/workbook.py, formulas.py)
+│   │   ├── graph_db/             # Kùzu graph databases: view.py (logic in engines/toolkit/kuzu_db.py)
 │   │   ├── map/                  # Leaflet map: store.py (places), view.py
 │   │   ├── cad/                  # engine.py (parts), mesh_view.py (3D), workbench.py (Part Design window), view.py
 │   │   ├── comms/                # email: engine.py (IMAP / SMTP / keyring), view.py (+ text / calls placeholders)
@@ -359,10 +364,16 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `ChannelHub` / channel | Class / concept | `app/views/channels.py` | Page-wide shared cursors (one hub per page); selection per source; a view can unlink. |
 | shared subscription | Concept | `app/views/subscriptions.py` | Views asking the same question of the same source share one engine request and its answer; a `<engine>.changed` event refreshes them. |
 | view builder | Dialog | `app/views/builder.py` | New view… / Edit view…: data, view type, mapping, filter, sort, name, live preview. |
-| `RecordsEngine` | Class (`Engine`) | `engines/records/engine.py` | Engine id `records` (temporary until the Data engine): record collections as Table shapes; the only writer of records. |
+| `DataEngine` | Class (`Engine`) | `engines/data/engine.py` | Engine id `data`: every table - record collections, user SQLite databases, CSV datasets, workbook sheets, Kùzu node tables - through the source contract, plus `register`, `export_json`, `graph`. Replaced the Phase 2 records engine. |
+| Data collection id | Concept (`str`) | `engines/data/common.py` | Record collections by name (`projects`); file tables as `db:<item>/<table>`, `csv:<item>`, `sheet:<item>/<sheet>`, `graph:<item>/<node table>`. |
+| `Source` | Class | `engines/data/common.py` | One Data collection: schema, query, get, create, update (returns a diff), duplicate, delete, move, add / remove property; refuses with `not_allowed` and says why. `RecordsSource`, `SqliteTable`, `GridTable`, `NodeTable`. |
+| formula property | Concept | `engines/data/records.py`, `PropertySpec.formula` | A record property computed from the others (`=[Price] * [Quantity]`); read-only, never stored. Sheet columns of formulas are computed fields too. |
+| `compile_query()` / `run_compiled()` | Functions | `engines/toolkit/sql.py` | Query v1 as SQLite SQL (filters, search, sort with empties last, group + aggregates, paging); answers like `run_query()`. |
+| `Engine.ask()` / `EngineManifest.uses` | Method / field | `engines/kernel/engine.py` | One engine asking another it declares in `uses` (Data asks Knowledge for files); `undeclared_use` otherwise. |
+| `ENGINE_RENAMES` | Constant (dict) | `app/views/api.py` | Retired engine -> its replacement (`records` -> `data`); saved views are upgraded on load. |
 | `RecordFocus` | Class | `app/modules/source_module.py` | The page's selected record of a source, fetched from the engine (Agents chat, Notes, exports). |
 | `DataViewModule` | Class (`ModuleView`) | `app/modules/data_view/view.py` | "Data view": any view of any source as a page tile or Canvas card. |
-| Query v1 | Contract | `engines/kernel/query.py` | The question a view asks: filter tree, search, sort, group + aggregates, paging, time range, extent. `run_query()` in `engines/toolkit/table.py`. |
+| Query v1 | Contract | `engines/kernel/query.py` | The question a view asks: filter tree, search, sort, group + aggregates, paging, time range, extent. `run_query()` in `engines/toolkit/table.py` (memory), `compile_query()` in `engines/toolkit/sql.py` (SQLite). |
 | `RecordsModule` | Class (`SourceModule`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`, optional `NEW_RECORD_PRESETS`; hooks `extra_block_specs()`, `record_actions()`); `AgentsModule`, `ProjectsModule` use it. |
 | `agent_definition()` | Function | `app/modules/agents/view.py` | An agent record as Markdown with front matter (name, description, model, tools from permissions) + instructions. |
 | provider | Concept | `app/modules/agents/engine.py` | Who runs an agent's model: Claude (Anthropic API), Gemini (Google AI API) or Ollama (local server). The agent's Provider property; `provider_of()` guesses it for older agents. |
@@ -378,8 +389,8 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `ToolDock` / `ToolTray` | Classes | `app/ui/toolbars.py` | Toolbars around every module tile: trays dock top / bottom / left / right or float, sizes, pin; saved in the module's `toolbars` setting. |
 | `run_in_thread()` | Function | `app/ui/ui_tools.py` | Slow work on a worker thread; `on_done(result, error)` back on the UI thread. With `on_progress`, `work(report)` streams values to the UI thread (chat answers). |
 | `status_label()` / `set_status()` | Functions | `app/ui/ui_tools.py` | A module's one-line outcome label (red when `is_error`). |
-| `SpreadsheetModule` / `Workbook` / `Sheet` | Classes | `app/modules/spreadsheet/` | Spreadsheet: grid with formula bar and sheet tabs; formulas in `formulas.py` (no eval); xlsx / csv, LibreOffice for ods / xls / pdf. |
-| `GraphDbModule` / `GraphDb` | Classes | `app/modules/graph_db/` | Kùzu graph databases (Library kind `graph`): schema, Cypher console, graph view, inspector. |
+| `SpreadsheetModule` / `Workbook` / `Sheet` | Classes | `app/modules/spreadsheet/`, `engines/toolkit/workbook.py` | Spreadsheet: grid with formula bar and sheet tabs; formulas in `engines/toolkit/formulas.py` (no eval; `[Field]` references for computed fields); xlsx / csv, LibreOffice for ods / xls / pdf. |
+| `GraphDbModule` / `GraphDb` | Classes | `app/modules/graph_db/`, `engines/toolkit/kuzu_db.py` | Kùzu graph databases (Library kind `graph`): schema, Cypher console, graph view, inspector. |
 | `MapModule` / `MapStore` | Classes | `app/modules/map/` | Leaflet map: base layers, places (SQLite `map_places`), GeoJSON layers (Library kind `geo`). |
 | `CadModule` / `Part` / `PartDesignWindow` | Classes | `app/modules/cad/` | CAD models in 3D (`MeshViewer`); parametric parts (sketches + pad / pocket / hole) designed in the Part Design window. |
 | `CommsModule` / `CommsStore` | Classes | `app/modules/comms/` | Email over IMAP / SMTP (passwords in the system keyring via `secrets.py`); text and calls are placeholders. |

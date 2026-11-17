@@ -19,6 +19,7 @@
 #               #view_message_label, #view_menu_btn
 #   - Exposes: ViewHost(definition, record_actions=None, parent=None) with signals state_changed, status(str, bool)
 # NOTES:
+#   - [2026-11-17] Phase 5a: a new row's id comes from the reply's "id" when there is one (file tables key rows by "_rowid").
 #   - [2026-11-17] request(): a view can ask its source engine for more (a note's text, the link graph) - Phase 4.
 #   - [2026-11-17] Phase 3: placeholders when the source engine or the view's engine is detached; back on attach.
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
@@ -62,6 +63,11 @@ from app.views.subscriptions import shared_queries
 # ==============================================================================
 # [1.2] init_and_state
 # ==============================================================================
+def _new_id(reply: dict):
+    """The id of a row a write made: "id" in the reply (Data), else the record's own "id"."""
+    return reply["id"] if "id" in reply else reply["record"]["id"]
+
+
 class ViewHost(QWidget):
     state_changed = Signal()                         # the definition changed: containers save it
     status = Signal(str, bool)                       # message, is_error
@@ -312,10 +318,10 @@ class ViewHost(QWidget):
 
     def create_record(self, values: dict | None = None, title: str | None = None) -> None:
         payload = {"values": values or {}} | ({"title": title} if title else {})
-        self._write("create", payload, lambda reply: self.select(reply["record"]["id"]))
+        self._write("create", payload, lambda reply: self.select(_new_id(reply)))
 
     def duplicate_record(self, record_id) -> None:
-        self._write("duplicate", {"id": record_id}, lambda reply: self.select(reply["record"]["id"]))
+        self._write("duplicate", {"id": record_id}, lambda reply: self.select(_new_id(reply)))
 
     def move_record(self, record_id, before_id=None) -> None:
         self._write("move", {"id": record_id, "before_id": before_id})

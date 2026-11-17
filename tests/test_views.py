@@ -13,6 +13,7 @@
 #   - Requires: tests/conftest.py fixtures, engines (kernel, toolkit, records), app.views, app.modules
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Record collections are the Data engine's now (Phase 5a).
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
 # ==============================================================================
 
@@ -44,7 +45,7 @@ FIELDS = [{"key": "status", "title": "Status", "kind": "select", "options": ["A"
           {"key": "tags", "title": "Tags", "kind": "multi_select"}]
 ROWS = [{"id": i, "title": f"row {i}", "status": "AB"[i % 2], "due": f"2026-03-{i + 1:02d}", "n": i,
          "tags": ["x"] if i % 3 == 0 else []} for i in range(10)]
-SOURCE = {"engine": "records", "collection": "projects"}
+SOURCE = {"engine": "data", "collection": "projects"}
 
 
 def project_rows(host) -> dict:
@@ -136,29 +137,30 @@ def test_records_engine_checks_values_and_announces_changes(database):
     from engines.runtime import get_bus
     bus = get_bus()
     heard = []
-    subscription = bus.subscribe("records.changed", lambda message: heard.append(message.payload))
+    subscription = bus.subscribe("data.changed", lambda message: heard.append(message.payload))
     properties = [{"key": "stage", "title": "Stage", "kind": "select", "options": ["Draft"]},
                   {"key": "budget", "title": "Budget", "kind": "number"}]
-    bus.call("records.register", {"collection": "phase2_items", "noun": "item", "properties": properties})
-    first = bus.call("records.create", {"collection": "phase2_items", "title": "One", "values": {"budget": "12.5", "stage": "Live"}})
+    bus.call("data.register", {"collection": "phase2_items", "noun": "item", "properties": properties})
+    first = bus.call("data.create", {"collection": "phase2_items", "title": "One", "values": {"budget": "12.5", "stage": "Live"}})
     assert first["record"]["budget"] == 12.5
     with pytest.raises(EngineError, match="Budget: “lots” is not a number"):
-        bus.call("records.update", {"collection": "phase2_items", "id": first["record"]["id"], "values": {"budget": "lots"}})
+        bus.call("data.update", {"collection": "phase2_items", "id": first["record"]["id"], "values": {"budget": "lots"}})
     with pytest.raises(EngineError, match="name can't be empty"):
-        bus.call("records.update", {"collection": "phase2_items", "id": first["record"]["id"], "values": {"title": " "}})
+        bus.call("data.update", {"collection": "phase2_items", "id": first["record"]["id"], "values": {"title": " "}})
     with pytest.raises(EngineError) as unknown:
-        bus.call("records.query", {"collection": "no_such_thing"})
+        bus.call("data.query", {"collection": "no_such_thing"})
     assert unknown.value.code == "not_found"
-    reply = bus.request("records.query", {"collection": "phase2_items"}).result(5)
+    reply = bus.request("data.query", {"collection": "phase2_items"}).result(5)
     stage = next(field for field in reply.payload["fields"] if field["key"] == "stage")
     assert stage["options"] == ["Draft", "Live"] and shapes.validate(reply.payload, reply.attachments) == []
-    assert reply.payload["source"] == {"engine": "records", "collection": "phase2_items", "noun": "item"}
+    assert reply.payload["source"] == {"engine": "data", "collection": "phase2_items", "noun": "item"}
     with pytest.raises(EngineError) as builtin:
-        bus.call("records.remove_property", {"collection": "phase2_items", "key": "budget"})
+        bus.call("data.remove_property", {"collection": "phase2_items", "key": "budget"})
     assert builtin.value.code == "not_allowed"
-    added = bus.call("records.add_property", {"collection": "phase2_items", "title": "Owner", "kind": "text"})["field"]
-    bus.call("records.remove_property", {"collection": "phase2_items", "key": added["key"]})
-    assert {"collection": "phase2_items", "ids": [first["record"]["id"]], "schema": False} in heard
+    added = bus.call("data.add_property", {"collection": "phase2_items", "title": "Owner", "kind": "text"})["field"]
+    bus.call("data.remove_property", {"collection": "phase2_items", "key": added["key"]})
+    assert any(event["collection"] == "phase2_items" and event["ids"] == [first["record"]["id"]] and event["op"] == "create"
+               and not event["schema"] for event in heard)
     assert any(event["schema"] for event in heard)
     subscription.unsubscribe()
 # --- END [2.3] ---

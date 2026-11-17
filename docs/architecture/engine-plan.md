@@ -23,6 +23,10 @@ This is the design. Status and the phases are in [ROADMAP.md](../../ROADMAP.md);
 | **Core engines** (`"core": true` in engine.json) stay attached: Knowledge is one, because every other engine stores its files through it. `detach()` refuses them | 2026-11-17 |
 | **The Library through a client:** modules and tools use `library()`, small blocking calls with the old store's names; slow work uses `call_engine`. Tools that open a file with their own library ask for its `path` (local only; remote engines will need a transfer request) | 2026-11-17 |
 | **`app/` never imports an engine's internals**, only `engines.kernel` / `runtime` / `toolkit` (checked by `check_standard.py`) | 2026-11-17 |
+| **Records keep JSON values, with indexes** (not typed columns): a new property never needs a migration; filters and sorts run in SQLite through `json_extract`, backed by expression indexes for select / number / date / checkbox properties; formula properties are computed, never stored | 2026-11-17 |
+| **Engines may ask engines they declare** (`EngineManifest.uses` + engine.json): `Engine.ask()` waits for the answer; no cycles; the asker carries on without it when it's missing. Data asks Knowledge for files | 2026-11-17 |
+| **One Data collection id per table:** record collections by name; file tables `db:<item>/<table>`, `csv:<item>`, `sheet:<item>/<sheet>`, `graph:<item>/<node table>`; the shape names the row key (`_rowid` for file tables) | 2026-11-17 |
+| **Writes keep the file's own format:** sheets are edited in place (openpyxl, formatting kept); formula cells, a node's key and views are refused, with the reason | 2026-11-17 |
 | **View types declare the requests they need** besides the query (`ViewType.requests`); the builder offers a view only for data that can serve it | 2026-11-17 |
 
 ## Architecture

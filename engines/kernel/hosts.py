@@ -17,6 +17,7 @@
 #   - Exposes: InProcessHost(engine_class, deliver) with start(), send(message), stop(), thread_name, queue_depth;
 #              INBOX_LIMIT, HEALTH_REQUEST
 # NOTES:
+#   - [2026-11-17] Phase 5a: passes the bus's ask() to its engine (Engine.ask).
 #   - [2026-11-17] Phase 3: bounded inbox (busy), stream credit (back-pressure), built-in "_health", queue_depth.
 #   - [2026-11-17] Created in Phase 1 of the engine plan.
 # ==============================================================================
@@ -58,8 +59,9 @@ HEALTH_REQUEST = "_health"
 # [1.2] in_process_host
 # ==============================================================================
 class InProcessHost:
-    def __init__(self, engine_class: type[Engine], deliver: Callable[[Message], None]) -> None:
-        self.engine_class, self.deliver = engine_class, deliver
+    def __init__(self, engine_class: type[Engine], deliver: Callable[[Message], None],
+                 ask: Callable[..., dict] | None = None) -> None:
+        self.engine_class, self.deliver, self.ask = engine_class, deliver, ask
         self.manifest = engine_class.MANIFEST
         self.thread_name = f"engine:{self.manifest.engine_id}"
         self.engine: Engine | None = None
@@ -112,7 +114,7 @@ class InProcessHost:
     def _run(self) -> None:
         try:
             self.engine = self.engine_class()
-            self.engine.attach(self.deliver)
+            self.engine.attach(self.deliver, self.ask)
             self.engine.start()
         except BaseException as error:                # reported by start(); the thread ends
             self._start_error = error

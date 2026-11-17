@@ -1,6 +1,6 @@
 # DevOS Roadmap
 
-Last updated: **2026-11-17** (Phase 4 done, v0.2.0; Phase 5 is next — see Now)
+Last updated: **2026-11-17** (Phase 5a done: the Data engine; 5b views next — see Now)
 
 The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog records what changed, and this file records where DevOS stands and what comes next. The design behind it (engines, data shapes, protocol, contracts) is in [docs/architecture/engine-plan.md](docs/architecture/engine-plan.md); what is stored where is in [docs/architecture/data-ownership.md](docs/architecture/data-ownership.md).
 
@@ -23,10 +23,10 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
     - the engine kernel (bus, in-process host, UI bridge);
     - data shapes and Query v1;
     - the Knowledge engine, sole owner of the Library (core engine; `library()` client; Notes and Library are views over it, with Document and Links views);
-    - the records engine;
+    - the Data engine (5a): records, user databases, CSV datasets, sheets and graphs behind one source contract;
     - the view runtime (ViewHost, page-wide channels, shared subscriptions, view builder, Data view tiles);
     - docking: engine packages, attach / detach with placeholders, conformance kit, Settings → Engines, bus inspector.
-- **Engine plan:** Phases 0–4 done. Projects and Agents run on the view runtime over a temporary records engine; Notes and Library over Knowledge. The other modules still run as modules; they move into engines phase by phase.
+- **Engine plan:** Phases 0–4 done, Phase 5a done. Projects and Agents run on the view runtime over the Data engine; Notes and Library over Knowledge. The other modules still run as modules; they move into engines phase by phase.
 
 ## Now
 
@@ -36,7 +36,16 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
 - **5c Templates and migration.** Projects, Agents (definitions), Events, Database, Spreadsheet, Graph DB. "Save as template". The picker shows Templates and "New view of an engine". Old module tiles become template instances, and records are copied into the Data store.
 - **Done when** the old Data-group modules, `RecordsModule` and the Phase 2 adapter are deleted, and the fixture's pages open with the same data and layouts.
 
-**Start here.** 5a first: the Data engine answering the source contract for record collections (taking over from the records engine), then user SQLite databases (the Database Editor's files, opened by `library().path()`), workbooks and CSV datasets. Answer the open question on JSON values vs typed columns before the store is designed. Knowledge's file service is the way to the files; Data never touches `library/` itself.
+**5a done (2026-11-17).** What was built:
+- **Data engine** (`engines/data/`, replaces the Phase 2 records engine, same tables): one source contract for record collections, user SQLite databases (`db:<item>/<table>`), CSV datasets (`csv:<item>`), workbook sheets (`sheet:<item>/<sheet>`) and Kùzu node tables (`graph:<item>/<table>`); `collections` lists every table in the Library; `graph` gives a database as a Graph shape.
+- **Query v1 per source:** SQL (`engines/toolkit/sql.py`; records through `json_extract` with expression indexes - the decision: JSON values with indexes), Cypher for Kùzu, in memory for CSV / sheets and questions about formulas. A test compares the SQL answers with the memory toolkit on 18 questions.
+- **Computed fields:** formula properties on records (`=[Price] * [Quantity]`); sheet columns of formulas are computed and read-only.
+- **Checked writes, announced with diffs:** values checked by kind; formula cells, node keys and views refused with the reason; `.xlsx` edited in place (formatting kept); `changed` events carry `op` and `{id: {field: [old, new]}}`.
+- **Kernel:** `Engine.ask()` + `EngineManifest.uses` (Data asks Knowledge for files; the kit checks engine.json). Grouped questions sort by their aggregates.
+- Shared logic moved to `engines/toolkit/` (formulas, workbook, kuzu_db); saved views of the records engine upgrade on load (`ENGINE_RENAMES`).
+- Tests: `tests/test_data_engine.py`; the kit passes 9 of 9; the fixture opens unchanged.
+
+**Start here (5b).** The generic views over any Data table: an editable grid (paging through big tables, `_rowid` keys, computed columns shown read-only), a chart view (Table → line / bar / scatter, using the `Series` toolkit for decimation), and a network view on `data.graph`. Then the specialist views: sheet (cells and formulas), SQL / Cypher consoles (new `data.sql` / `data.cypher` requests) and table structure. Decide the open question on how Data hears Knowledge's changes first (below).
 
 
 ## Next
@@ -239,6 +248,8 @@ DevOS is a **host platform** for organising and visualising any kind of data: ch
 ## Future ideas
 
 Ideas raised but not yet placed in a phase:
+- Data: re-read a Kùzu node table's columns when the Graph Database module changes its schema (SQLite tables already follow `schema_version`).
+- Data: formula properties that refer to other collections (relations, rollups).
 - Document view: reload a note that another view or window changed while it is open (today only the item you switch to is re-read).
 - Backlinks in the Document view (which notes link here), from Knowledge's `links`.
 - Shareable template files (held: templates stay local for now).
@@ -251,7 +262,7 @@ Ideas raised but not yet placed in a phase:
 
 ## Open questions
 
-- **Phase 5:** do records keep JSON values with indexes (recommended), or become typed columns?
+- **Phase 5b:** Data doesn't hear Knowledge's `changed` events (engines can't subscribe to other engines yet), so a file rewritten by the Spreadsheet or Database Editor module only shows in Data views at their next question. Add `Engine.watch()` for engines in `uses` (recommended), or have Knowledge include file kinds in events the front end forwards?
 - **Phase 6:** MapLibre GL for the interactive map (recommended), or keep Leaflet? For print layouts, render them in the engine, or hand them to QGIS (`qgis_process` with a layout)?
 - **Phase 7:** are all monitors on one machine, or can some belong to other machines from the start?
 - **Phase 12:** Python-only user views, or also a sandboxed option?

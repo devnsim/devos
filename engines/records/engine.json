@@ -1,8 +1,0 @@
-{
-  "id": "records",
-  "title": "Records",
-  "version": "0.1",
-  "summary": "Record collections (Projects, Agents …) as tables. Temporary: the Data engine replaces it in Phase 5.",
-  "entry": "engine:RecordsEngine",
-  "kernel_api": 1
-}

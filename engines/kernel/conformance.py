@@ -14,6 +14,7 @@
 #   - Exposes: Check, check_package(folder), check_engine(engine_class, package=None), report(checks) -> str,
 #              SOURCE_REQUESTS, main(argv)
 # NOTES:
+#   - [2026-11-17] Phase 5a: the engines a manifest uses must be in engine.json's requires / uses.
 #   - [2026-11-17] Created in Phase 3 of the engine plan.
 # ==============================================================================
 
@@ -108,10 +109,12 @@ def check_engine(engine_class, package: EnginePackage | None = None) -> list[Che
                  if spec.shape and spec.shape not in SHAPES]
     checks.append(Check("manifest is valid", not problems, "; ".join(problems)))
     if package is not None:
-        same = package.engine_id == engine_id and package.version == manifest.version
+        undeclared = [name for name in manifest.uses if name not in package.requires + package.uses]
+        same = package.engine_id == engine_id and package.version == manifest.version and not undeclared
         checks.append(Check("engine.json matches the manifest", same,
                             "" if same else f"engine.json {package.engine_id} {package.version}, manifest {engine_id} "
-                                            f"{manifest.version}"))
+                                            f"{manifest.version}" + (f"; uses {', '.join(undeclared)} but engine.json "
+                                                                     "doesn't list it" if undeclared else "")))
     engine = engine_class.__new__(engine_class)
     missing = [spec.name for spec in manifest.requests if engine_class.handler(engine, spec.name) is None]
     checks.append(Check("every request has a handler", not missing, ", ".join(f"on_{name}" for name in missing)))

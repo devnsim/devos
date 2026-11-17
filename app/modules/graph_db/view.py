@@ -8,13 +8,14 @@
 #      Cypher (run with Ctrl+Enter, results grid, history, "show result as graph"), Graph (force layout,
 #      click to inspect, labels), Inspector (properties of the selected element).
 # CONTRACT:
-#   - Requires: app.modules.base.ModuleView, app.modules.graph_db.engine, kuzu (optional), networkx,
+#   - Requires: app.modules.base.ModuleView, engines.toolkit.kuzu_db, kuzu (optional), networkx,
 #               pyqtgraph, app.clients.library, app.ui (ui_tools, plot_tools, tool_bag, canvas, theme),
 #               QSS selectors #graph_db_panel, #cypher_editor
 #   - Exposes: GraphDbModule(parent=None, context=None) with graph_db, item_id, open_item(), new_database(),
 #              run_query(text), show_graph(sample), select_element(element); SchemaBlock, CypherBlock,
 #              GraphViewBlock, InspectorBlock
 # NOTES:
+#   - [2026-11-17] GraphDb is imported from engines.toolkit.kuzu_db (moved in Phase 5a; the Data engine shares it).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (KuzuDB graph database view).
 # ==============================================================================
@@ -61,7 +62,7 @@ from PySide6.QtWidgets import (
 from app.data.activity_log import get_activity_log
 from app.clients.library import library
 from app.modules.base import ModuleView
-from app.modules.graph_db.engine import (
+from engines.toolkit.kuzu_db import (
     KUZU_TYPES, GraphDb, GraphDbError, GraphSample, describe, element_key, is_node, is_rel, kuzu_unavailable_reason,
     properties_of,
 )

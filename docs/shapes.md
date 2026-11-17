@@ -11,7 +11,7 @@ The common data format on every connection in DevOS: sources → engines → vie
 
 ## Fields
 
-A typed column, shared by Table, Geo, Graph and Series channels: `{"key", "title", "kind", "options", "unit"}`. Engines may add keys of their own (the records engine adds `is_user`).
+A typed column, shared by Table, Geo, Graph and Series channels: `{"key", "title", "kind", "options", "unit"}`. Engines may add keys of their own (the Data engine adds `is_user`, `read_only`, `computed`, `formula`, `primary_key`).
 
 Kinds: `text`, `long_text`, `number`, `integer`, `select`, `multi_select`, `date` (YYYY-MM-DD), `datetime` (ISO 8601), `checkbox`, `url`, `geometry`, `json`.
 

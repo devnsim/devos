@@ -11,6 +11,7 @@
 #               QSS selectors #data_view_panel, #empty_tile_label
 #   - Exposes: DataViewModule(parent=None, context=None) with host (ViewHost | None), choose_data()
 # NOTES:
+#   - [2026-11-17] Phase 5a: the default source is the Data engine's projects.
 #   - [2026-11-17] Created in Phase 2 of the engine plan (ViewHost as a page tile and a Canvas card).
 # ==============================================================================
 
@@ -65,7 +66,7 @@ class DataViewModule(ModuleView):
 
     def choose_data(self) -> None:
         from app.views.builder import ViewBuilderDialog
-        start = self.host.block_state() if self.host else make_definition("table", {"engine": "records", "collection": "projects"})
+        start = self.host.block_state() if self.host else make_definition("table", {"engine": "data", "collection": "projects"})
         dialog = ViewBuilderDialog(self, start)
         if dialog.exec():
             self._show(dialog.definition())

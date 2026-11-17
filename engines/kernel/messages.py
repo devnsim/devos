@@ -14,6 +14,7 @@
 #   - Exposes: Message, MESSAGE_KINDS, EFFECTS, RequestSpec, EngineManifest, EngineError, plain_data(value),
 #              new_id(), WIRE_VERSION
 # NOTES:
+#   - [2026-11-17] Phase 5a: EngineManifest.uses - the engines an engine may ask (Engine.ask).
 #   - [2026-11-17] Phase 3: "credit" message kind (stream back-pressure); RequestSpec shape, example, timeout_s.
 #   - [2026-11-17] Created in Phase 1 of the engine plan (docs/architecture/engine-plan.md).
 # ==============================================================================
@@ -164,6 +165,7 @@ class EngineManifest:
     events: tuple[str, ...] = ()
     shapes: tuple[str, ...] = ()
     owns: tuple[str, ...] = ()                  # tables / folders only this engine touches
+    uses: tuple[str, ...] = ()                  # engines this one may ask (Engine.ask); never a cycle
     placement: str = "local"                    # "local" or "remote-capable"
 
     def request(self, name: str) -> RequestSpec | None:
@@ -173,7 +175,7 @@ class EngineManifest:
         """The manifest as plain data (for tools, agents and the docs)."""
         return plain_data({"engine_id": self.engine_id, "title": self.title, "version": self.version,
                            "summary": self.summary, "events": list(self.events), "shapes": list(self.shapes),
-                           "owns": list(self.owns), "placement": self.placement,
+                           "owns": list(self.owns), "uses": list(self.uses), "placement": self.placement,
                            "requests": [{"name": spec.name, "summary": spec.summary, "effect": spec.effect,
                                          "params": list(spec.params), "optional": list(spec.optional),
                                          "streams": spec.streams, "shape": spec.shape} for spec in self.requests]})

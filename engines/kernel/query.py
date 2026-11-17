@@ -10,9 +10,10 @@
 #      shared subscriptions use ("same question").
 # CONTRACT:
 #   - Requires: standard library only.
-#   - Exposes: OPERATORS, AGGREGATES, query(), condition(), all_of(), any_of(), not_(), validate_query(),
+#   - Exposes: OPERATORS, AGGREGATES, query(), condition(), all_of(), any_of(), not_(), validate_query(), aggregate_names(),
 #              query_key(), EMPTY_QUERY
 # NOTES:
+#   - [2026-11-17] Grouped questions may sort by their aggregates (aggregate_names()); found by the Data engine's tests.
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
 # ==============================================================================
 
@@ -74,6 +75,14 @@ def query(fields: list[str] | None = None, filter: dict | None = None, search: s
     return {key: value for key, value in parts.items() if value is not None}
 
 
+def aggregate_names(question: dict) -> list[str]:
+    """The result fields of a grouped question's aggregates ("count", "sum_qty", or their "as" names)."""
+    if not question.get("group_by"):
+        return []
+    return [item.get("as") or (item.get("op") if item.get("op") == "count" else f"{item.get('op')}_{item.get('field')}")
+            for item in question.get("aggregates") or [{"op": "count"}]]
+
+
 def query_key(source: dict, question: dict) -> str:
     """Stable identity of "this question to this source" (shared subscriptions)."""
     return json.dumps({"source": source, "query": question}, sort_keys=True, separators=(",", ":"))
@@ -111,14 +120,16 @@ def validate_query(question: dict, field_keys: set[str] | None = None) -> list[s
     """What is wrong with a query ([] = fine). With field_keys, field names are checked too."""
     problems = [f"unknown query key “{key}”" for key in question if key not in QUERY_KEYS]
     known = None if field_keys is None else set(field_keys)
+    sortable = known | set(aggregate_names(question)) if known is not None else None   # grouped: sort by totals too
     named = list(question.get("fields") or []) + list(question.get("group_by") or []) + \
-        [item.get("field") for item in question.get("sort") or []] + \
         [item.get("field") for item in question.get("aggregates") or [] if item.get("op") != "count"]
     for part in ("time_range", "extent"):
         if question.get(part):
             named.append(question[part].get("field"))
     if known is not None:
         problems += [f"unknown field “{name}”" for name in named if name not in known]
+        problems += [f"unknown field “{item.get('field')}”" for item in question.get("sort") or []
+                     if item.get("field") not in sortable]
     for item in question.get("aggregates") or []:
         if item.get("op") not in AGGREGATES:
             problems.append(f"unknown aggregate “{item.get('op')}”")

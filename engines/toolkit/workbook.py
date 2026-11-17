@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: app/modules/spreadsheet/engine.py
+# FILE: engines/toolkit/workbook.py
 # OVERVIEW: Spreadsheet data and files: workbooks of sheets of cells (raw text or formulas), computed
 #           values with dependency-safe evaluation, and reading / writing .xlsx, .csv and (through
 #           LibreOffice headless) .ods / .xls / .pdf.
@@ -8,12 +8,13 @@
 #   2. Workbook: named sheets; load(path) / save(path) by extension.
 #   3. LibreOffice: convert_with_libreoffice(source, extension) for formats openpyxl doesn't speak.
 # CONTRACT:
-#   - Requires: app.modules.spreadsheet.formulas, openpyxl (optional: .xlsx), soffice on PATH (optional:
+#   - Requires: engines.toolkit.formulas, openpyxl (optional: .xlsx), soffice on PATH (optional:
 #               .ods / .xls / .pdf). No Qt.
 #   - Exposes: Sheet, Workbook, SpreadsheetError, parse_literal(text), format_value(value),
 #              libreoffice_path(), convert_with_libreoffice(source, extension, out_dir), has_openpyxl(),
 #              NATIVE_EXTENSIONS, OFFICE_EXTENSIONS
 # NOTES:
+#   - [2026-11-17] Moved from app/modules/spreadsheet/engine.py (Phase 5a: the Data engine reads workbooks too).
 #   - [2026-11-16] Created with the Spreadsheet module.
 # ==============================================================================
 
@@ -46,7 +47,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app.modules.spreadsheet.formulas import FormulaError, column_name, evaluate, parse
+from engines.toolkit.formulas import FormulaError, column_name, evaluate, parse
 
 NATIVE_EXTENSIONS = (".xlsx", ".xlsm", ".csv", ".tsv")
 OFFICE_EXTENSIONS = (".ods", ".xls", ".fods")

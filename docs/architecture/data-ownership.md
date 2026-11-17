@@ -4,7 +4,7 @@ What DevOS stores today, where, who writes it, and which engine of the [engine p
 
 **Owner** is the engine that will be the only code allowed to read and write that data directly. **Workspace** means it describes how your desk is arranged, and stays in the workspace database (`devos.sqlite3`) after the engine phases.
 
-As of 2026-11-17 (Phase 4: Knowledge owns the Library; phase numbers follow the plan's renumbering with Docking, Spatial and Displays).
+As of 2026-11-17 (Phase 5a: Data owns record collections and reads / writes the Library's tables; Knowledge owns the Library; phase numbers follow the plan's renumbering with Docking, Spatial and Displays).
 
 ## The data folder
 
@@ -21,8 +21,8 @@ As of 2026-11-17 (Phase 4: Knowledge owns the Library; phase numbers follow the 
 | pages | `page_folders`, `pages` | `PageStore` | Your pages, folders, favourites, page kind and state | Workspace | stays |
 | activity_log | `log_sessions`, `log_entries` | `ActivityLog.flush()` | System Log history | Workspace | stays |
 | content | `content_items` | The Knowledge engine only (`engines/knowledge/store.py`, its own connection) since Phase 4; everything else asks it (`app.clients.library`) | Index of Library files: name, kind, file name, size, metadata | Knowledge | done (4) |
-| records | `record_collections`, `record_items` | The records engine (`engines/records/`, its own connection) since Phase 2 | Records with JSON values; user-added properties | Data | 5 |
-| records_adapter | `records_adapter_defaults` | The records engine (`register`) | Each collection's declared default properties and noun | Data (replaced by template schemas) | 5 |
+| records | `record_collections`, `record_items` (+ expression indexes `record_items_value_*`) | The Data engine (`engines/data/records.py`, its own connection) since Phase 5a | Records with JSON values (indexed); user-added properties, formula properties (computed, never stored) | Data | done (5a) |
+| records_adapter | `records_adapter_defaults` | The Data engine (`register`) | Each collection's declared default properties and noun | Data (replaced by template schemas) | 5c |
 | map | `map_places` | `MapStore` | Your places | Spatial (copied into a GeoPackage layer) | 6a |
 | agents | `agents_conversations`, `agents_messages` | `ChatStore` | Agent chats | Conversation | 10 |
 | comms | `comms_accounts`, `comms_messages`, `comms_threads`, `comms_texts` | `CommsStore` | Mail accounts, cached mail headers and bodies, local text threads | Conversation | 10 |
@@ -46,7 +46,7 @@ Files have random names on disk; `content_items` maps them to the names you see.
 | image | `.png` … | Capture tool, browser downloads | Knowledge |
 | file | anything else | Records "Export as JSON", browser downloads, Library import | Knowledge |
 
-User databases are edited in place by the Database Editor (writes go straight to the file); `library().refresh_size()` (Knowledge's `refresh_size` request) keeps the index in step.
+User databases, CSV datasets, sheets and graphs are also written in place by the Data engine (it asks Knowledge for the path and reports the new size), and user databases by the Database Editor (writes go straight to the file); `library().refresh_size()` (Knowledge's `refresh_size` request) keeps the index in step.
 
 ### Other entries
 
@@ -73,6 +73,6 @@ User databases are edited in place by the Database Editor (writes go straight to
 
 ## Rules
 
-1. One owner per table and per Library kind. From an engine's phase onward, only that engine touches its data; everything else asks over the bus. Done for the Library (Knowledge, Phase 4: `check_standard.py` stops `app/` importing engine internals) and record collections (records engine, Phase 2); `get_collection` remains only in the Phase 0 fixture check.
+1. One owner per table and per Library kind. From an engine's phase onward, only that engine touches its data; everything else asks over the bus. Done for the Library (Knowledge, Phase 4: `check_standard.py` stops `app/` importing engine internals) and record collections (Data engine, Phase 5a); `get_collection` remains only in the Phase 0 fixture check.
 2. Data moves to its engine's store during that engine's phase: copied, verified with the fixture, and old tables kept for one version.
 3. Secrets never go into SQLite or backups (`app/data/store/secrets.py`).

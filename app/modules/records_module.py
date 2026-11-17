@@ -1,7 +1,7 @@
 # ==============================================================================
 # FILE: app/modules/records_module.py
 # OVERVIEW: RecordsModule - the base for modules whose data is a record collection (Projects, Agents ...): a
-#           SourceModule on the records engine that declares the collection's default properties first.
+#           SourceModule on the Data engine that declares the collection's default properties first.
 # PURPOSE:
 #   1. Subclasses declare COLLECTION, NOUN, PROPERTIES, DEFAULT_LAYOUT (and NEW_RECORD_PRESETS); the module
 #      registers the collection's default properties with the records engine before any view asks for data.
@@ -14,6 +14,7 @@
 #   - Exposes: RecordsModule(parent=None, context=None) with create_record(), export_json(), NEW_RECORD_PRESETS;
 #              plus SourceModule's API (source, focus, block_canvas, hooks); RecordFocus, record_from_row (re-exported)
 # NOTES:
+#   - [2026-11-17] Phase 5a: record collections live in the Data engine (the records engine is gone).
 #   - [2026-11-17] Phase 4: the generic half moved to app/modules/source_module.py (SourceModule, RecordFocus).
 #   - [2026-11-17] Phase 2: views are ViewHosts on the records engine (RecordsController and app/ui/record_views.py
 #                  are gone); RecordFocus replaces the controller for module code; New view… opens the builder.
@@ -57,9 +58,9 @@ class RecordsModule(SourceModule):
 
     def before_views(self) -> None:
         self.log = get_activity_log()
-        self.source = {"engine": "records", "collection": self.COLLECTION}
-        call_engine(self, "records.register", {"collection": self.COLLECTION, "noun": self.NOUN,   # before any query
-                                               "properties": [spec.to_dict() for spec in self.PROPERTIES]})
+        self.source = {"engine": "data", "collection": self.COLLECTION}
+        call_engine(self, "data.register", {"collection": self.COLLECTION, "noun": self.NOUN,   # before any query
+                                            "properties": [spec.to_dict() for spec in self.PROPERTIES]})
 
     def toolbar_start(self, row: QHBoxLayout) -> None:
         new_btn = QPushButton(f"+ New {self.NOUN}")
@@ -84,7 +85,7 @@ class RecordsModule(SourceModule):
                 self.report(str(error), is_error=True)
             else:
                 self.focus.select(reply["record"]["id"])
-        call_engine(self, "records.create", payload, answered)
+        call_engine(self, "data.create", payload, answered)
 
     def export_json(self) -> None:
         def answered(reply, error) -> None:
@@ -97,5 +98,5 @@ class RecordsModule(SourceModule):
                 self.report(f"Saved “{item.name}” in your Library")
             except LibraryError as error:
                 self.report(str(error), is_error=True)
-        call_engine(self, "records.export_json", {"collection": self.COLLECTION}, answered)
+        call_engine(self, "data.export_json", {"collection": self.COLLECTION}, answered)
 # --- END [1.1] ---

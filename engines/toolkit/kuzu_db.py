@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: app/modules/graph_db/engine.py
+# FILE: engines/toolkit/kuzu_db.py
 # OVERVIEW: Graph database logic (no Qt) on Kùzu, an embedded property-graph database queried with
 #           Cypher: open a database file, run queries, read the schema, create tables, sample a graph
 #           for drawing, load a small sample dataset.
@@ -13,6 +13,7 @@
 #   - Exposes: GraphDb, GraphDbError, QueryOutcome, GraphSample, kuzu_unavailable_reason(), is_node(), is_rel(),
 #              element_key(), describe(), KUZU_TYPES, quote_name()
 # NOTES:
+#   - [2026-11-17] Moved from app/modules/graph_db/engine.py (Phase 5a: the Data engine reads Kùzu graphs too).
 #   - [2026-11-16] Created with the Graph Database module (Kùzu 0.11: one database file + a .wal next to it).
 # ==============================================================================
 

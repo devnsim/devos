@@ -1,0 +1,9 @@
+{
+  "id": "data",
+  "title": "Data",
+  "version": "0.1",
+  "summary": "Tables of every kind: records, your databases, datasets, sheets and graphs.",
+  "entry": "engine:DataEngine",
+  "kernel_api": 1,
+  "uses": ["knowledge"]
+}

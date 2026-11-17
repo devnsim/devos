@@ -12,6 +12,7 @@
 #               inspector, engine bridge), examples/engines/sample_data, tools/check_standard.py
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 5a: the Data engine replaces Records (packages, Settings test).
 #   - [2026-11-17] The Settings test detaches Records: Knowledge is a core engine now (Detach is off for it).
 #   - [2026-11-17] Created in Phase 3 of the engine plan.
 # ==============================================================================
@@ -106,7 +107,7 @@ def test_packages_are_read_without_running_them_and_checked(tmp_path):
 
 def test_conformance_kit_passes_good_engines_and_names_what_is_wrong(tmp_path):
     from engines.kernel.conformance import check_engine, check_package
-    for folder in (ROOT / "engines" / "knowledge", ROOT / "engines" / "records", SAMPLE):
+    for folder in (ROOT / "engines" / "knowledge", ROOT / "engines" / "data", SAMPLE):
         checks = check_package(folder)
         assert all(check.ok for check in checks), [check for check in checks if not check.ok]
 
@@ -242,7 +243,7 @@ def test_an_engine_built_elsewhere_docks_and_its_views_survive_detaching(qapp, d
 def test_engines_never_import_each_other():
     sys.path.insert(0, str(ROOT / "tools"))
     from check_standard import boundary_errors
-    assert boundary_errors("engines/spatial/engine.py", ["from engines.records.engine import RecordsEngine"])
+    assert boundary_errors("engines/spatial/engine.py", ["from engines.data.engine import DataEngine"])
     assert not boundary_errors("engines/spatial/engine.py", ["from engines.kernel import Bus", "from engines.toolkit import table"])
     assert not boundary_errors("examples/engines/sample_data/views.py", ["from PySide6.QtWidgets import QWidget"])
     assert boundary_errors("examples/engines/sample_data/engine.py", ["from PySide6.QtWidgets import QWidget"])
@@ -261,21 +262,21 @@ def test_settings_engines_section_and_bus_inspector(qapp, database, wait_for, mo
     page.show()
     rows = {page.engines_tree.topLevelItem(i).data(0, 0x0100): page.engines_tree.topLevelItem(i)
             for i in range(page.engines_tree.topLevelItemCount())}
-    assert {"knowledge", "records"} <= set(rows) and rows["records"].text(4) == "built in"
+    assert {"knowledge", "data"} <= set(rows) and rows["data"].text(4) == "built in"
     assert rows["knowledge"].text(4) == "built in · core"
     rows["knowledge"].setSelected(True)                       # a core engine: Detach is off, and refused anyway
     assert not page.detach_btn.isEnabled() and not page.attach_btn.isEnabled()
     page._attach_or_detach(False)
     assert "core engine" in page.engine_status_label.text() and get_bus().is_attached("knowledge")
     page.engines_tree.clearSelection()
-    row_of(page, "Records").setSelected(True)
+    row_of(page, "Data").setSelected(True)
     assert page.detach_btn.isEnabled() and not page.attach_btn.isEnabled()
     page._attach_or_detach(False)
-    assert wait_for(lambda: row_of(page, "Records").text(2) == "Detached", 5)
-    row_of(page, "Records").setSelected(True)
+    assert wait_for(lambda: row_of(page, "Data").text(2) == "Detached", 5)
+    row_of(page, "Data").setSelected(True)
     page._attach_or_detach(True)
-    assert wait_for(lambda: row_of(page, "Records").text(2).startswith("Attached"), 5)
-    row_of(page, "Records").setSelected(True)
+    assert wait_for(lambda: row_of(page, "Data").text(2).startswith("Attached"), 5)
+    row_of(page, "Data").setSelected(True)
     page.check_selected_engine()
     assert wait_for(lambda: "checks passed" in page.engine_status_label.text(), 20)
     assert "✘" not in page.engine_status_label.toolTip()
