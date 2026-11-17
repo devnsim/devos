@@ -1,0 +1,27 @@
+<!--
+  FILE: core/physics/scenes/demo/environment.xml
+  OVERVIEW: Demo room for the physics engine (Jolt side): floor, a static fixture, a convex mesh wedge and a
+            loose box the arm's paddle can push. Only parsed by MuJoCo; simulated by Jolt.
+  NOTES:
+    - [2026-11-16] Created with the physics engine groundwork. Bodies without joints are static; the box has a
+                   free joint, so it is a dynamic Jolt body (mass from its density).
+-->
+<mujoco model="demo_room">
+  <compiler angle="radian" meshdir="parts"/>
+  <asset>
+    <mesh name="wedge" file="wedge.obj"/>
+  </asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="4 4 0.1" friction="0.9"/>
+    <body name="fixture" pos="0.45 -0.45 0.15">
+      <geom name="fixture_block" type="box" size="0.1 0.1 0.15"/>
+    </body>
+    <body name="ramp" pos="-0.5 0.4 0">
+      <geom name="ramp_hull" type="mesh" mesh="wedge"/>
+    </body>
+    <body name="loose_box" pos="0.62 0.25 0.05">
+      <freejoint/>
+      <geom name="box" type="box" size="0.05 0.05 0.05" density="500" friction="0.6"/>
+    </body>
+  </worldbody>
+</mujoco>

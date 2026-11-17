@@ -16,6 +16,7 @@
 #   - Requires: Python 3.10+, git (for --changed and the dated-notes check). No DevOS imports.
 #   - Exposes: command-line tool; check_file(path, text) -> list[str] for reuse in tests.
 # NOTES:
+#   - [2026-11-16] Checks the physics engine's C++ (core/physics/**), skipping build/ and fetched _deps/.
 #   - [2026-11-16] Dated-notes rule: a changed file needs a NOTES entry dated on/after the last commit's
 #                  date (was: exactly today, which failed every file of a session that crossed midnight).
 #   - [2026-11-15] Created in the health pass so humans and agents can verify the standard in one
@@ -49,7 +50,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_GLOBS = ("app/**/*.py", "tools/**/*.py", "core/src/*.cpp", "core/src/*.hpp")
+SOURCE_GLOBS = ("app/**/*.py", "tools/**/*.py", "core/src/*.cpp", "core/src/*.hpp",
+                "core/physics/**/*.cpp", "core/physics/**/*.hpp")
+SKIPPED_PARTS = {"build", "_deps"}            # build output and fetched third-party code (Jolt)
 HEADER_KEYS = ("FILE:", "OVERVIEW:", "PURPOSE:", "CONTRACT:", "NOTES:")
 NOTE_ENTRY = re.compile(r"^(#|//)\s+- \[(\d{4}-\d{2}-\d{2})\]")
 SECTION = re.compile(r"^# \[(\d+\.\d+)\] (\w+)\s*$")
@@ -152,7 +155,8 @@ def main() -> int:
     arguments = parser.parse_args()
 
     changed = changed_files()
-    files = sorted({path for pattern in SOURCE_GLOBS for path in ROOT.glob(pattern)})
+    files = sorted({path for pattern in SOURCE_GLOBS for path in ROOT.glob(pattern)
+                    if not SKIPPED_PARTS & set(path.relative_to(ROOT).parts)})
     error_count = 0
     for path in files:
         relative = path.relative_to(ROOT).as_posix()
