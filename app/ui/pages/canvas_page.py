@@ -6,17 +6,20 @@
 #   1. PageTitleEdit: the page name, shown as a heading; click (or F2 / Rename) to edit, Enter or
 #      clicking away saves, Esc cancels.
 #   2. A ModuleCanvas keyed by the page id, so each page keeps its own saved layout and modules.
-#   3. New (empty) pages show a "Create New" panel: New Module (an empty tile with the module dropdown)
-#      or New Browser (MainWindow turns the page into a browser page). Closing the last module brings
-#      the panel back.
+#   3. New (empty) pages show a "Create New" panel: New Module (an empty tile with the module dropdown),
+#      New Browser or New Canvas (MainWindow turns the page into a browser / infinite canvas page). Closing
+#      the last module brings the panel back.
 # CONTRACT:
 #   - Requires: app.ui.canvas.module_canvas.ModuleCanvas, app.data.store.pages.canvas_key,
 #               app.data.store.database.Database, app.ui.widgets.sidebar.load_icon, QSS selectors
-#               #page_title_edit, #create_new_panel, #create_new_label, #new_module_btn, #new_browser_btn
-#   - Exposes: CanvasPage(page_id, title, database) (QWidget) with signals title_edited(str), browser_requested();
+#               #page_title_edit, #create_new_panel, #create_new_label, #new_module_btn, #new_browser_btn,
+#               #new_canvas_btn, app.data.store.pages (PAGE_KIND_BROWSER, PAGE_KIND_INFINITE_CANVAS)
+#   - Exposes: CanvasPage(page_id, title, database) (QWidget) with signals title_edited(str), kind_requested(str);
 #              set_title(title); start_title_edit(); add_first_module(); module_canvas; create_new_panel;
 #              page_id; PageTitleEdit
 # NOTES:
+#   - [2026-11-17] "New Canvas" on the Create New panel (an infinite canvas page). browser_requested() became
+#                  kind_requested(page kind), one signal for every "turn this page into ..." button.
 #   - [2026-11-16] The canvas shows as soon as it holds a tile, however it got there (not only via New Module).
 #   - [2026-11-16] New pages are empty: a centred "Create New" panel with New Module / New Browser instead
 #                  of an automatic empty module tile. The panel returns when the last module is closed.
@@ -28,7 +31,7 @@
 # [DEFINITIONS]
 # - page template: The one page class all user pages share (this file).
 # - PAGE_MARGIN_PX (int | px): Empty space around the page content (default: 8).
-# - Create New panel: What an empty page shows - New Module / New Browser.
+# - Create New panel: What an empty page shows - New Module / New Browser / New Canvas.
 # ==============================================================================
 
 # ==============================================================================
@@ -48,7 +51,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.data.store.database import Database
-from app.data.store.pages import canvas_key
+from app.data.store.pages import PAGE_KIND_BROWSER, PAGE_KIND_INFINITE_CANVAS, canvas_key
 from app.ui.canvas.module_canvas import ModuleCanvas
 from app.ui.widgets.sidebar import load_icon
 # --- END [1.1] ---
@@ -106,7 +109,7 @@ class CanvasPage(QWidget):
     """Page template: editable title + module canvas (see file header)."""
 
     title_edited = Signal(str)
-    browser_requested = Signal()                    # "New Browser": MainWindow replaces this page
+    kind_requested = Signal(str)                    # New Browser / New Canvas: MainWindow replaces this page
 
     PAGE_MARGIN_PX = 8
     SECTION_SPACING_PX = 6
@@ -146,8 +149,12 @@ class CanvasPage(QWidget):
         self.new_browser_btn = QPushButton("New Browser", objectName="new_browser_btn",
                                            toolTip="Turn this page into a web browser")
         self.new_browser_btn.setIcon(load_icon("globe.svg"))
-        self.new_browser_btn.clicked.connect(self.browser_requested)
-        for button in (self.new_module_btn, self.new_browser_btn):
+        self.new_browser_btn.clicked.connect(lambda: self.kind_requested.emit(PAGE_KIND_BROWSER))
+        self.new_canvas_btn = QPushButton("New Canvas", objectName="new_canvas_btn",
+                                          toolTip="Turn this page into an endless grid of module cards")
+        self.new_canvas_btn.setIcon(load_icon("canvas.svg"))
+        self.new_canvas_btn.clicked.connect(lambda: self.kind_requested.emit(PAGE_KIND_INFINITE_CANVAS))
+        for button in (self.new_module_btn, self.new_browser_btn, self.new_canvas_btn):
             button.setIconSize(QSize(16, 16))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             panel_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)

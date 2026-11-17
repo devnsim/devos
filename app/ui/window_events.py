@@ -6,12 +6,13 @@
 #   1. watch(widget): filters the mouse events of that widget's top-level window at its QWindow (where
 #      Qt delivers them before routing them to a child widget).
 #   2. add_press_handler(handler): handler(target, local_position, event) -> True consumes the press
-#      (title bar: start a window move / toggle maximise).
+#      (title bar: start a window move / toggle maximise); remove_press_handler(handler) when its window goes.
 #   3. pressed(QWidget) signal: the deepest widget under any press (active pane / active tile).
 # CONTRACT:
 #   - Requires: PySide6
 #   - Exposes: WindowMouseHub, mouse_hub() (shared instance)
 # NOTES:
+#   - [2026-11-17] remove_press_handler(): windows come and go now (a tab can open in a new window).
 #   - [2026-11-16] Created. PySide 6.11 segfaults when a Python event filter installed on the
 #                  QApplication receives events for Qt WebEngine's internal QtQuick objects (it fails to
 #                  wrap them), which made browser pages crash the app on focus. Filtering at the window
@@ -62,6 +63,10 @@ class WindowMouseHub(QObject):
 
     def add_press_handler(self, handler) -> None:
         self._handlers.append(handler)
+
+    def remove_press_handler(self, handler) -> None:
+        if handler in self._handlers:
+            self._handlers.remove(handler)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() not in PRESS_EVENTS:

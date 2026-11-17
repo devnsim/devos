@@ -11,6 +11,8 @@
 #               #selector no widget uses, so this list can't silently go stale.
 #   - Exposes: STYLESHEET (str) and every *_COLOR / *_PX token, for widgets that need a color in code.
 # NOTES:
+#   - [2026-11-17] Styles for Canvas pages (#infinite_canvas_*, #module_card_panel, #card_*, #canvas_control*),
+#                  the New Canvas button and the web app's floating options button (#web_app_options_btn).
 #   - [2026-11-16] ERROR / WARNING / SUCCESS colour tokens and TAG_COLORS; styles for toolbars, the tool bag,
 #                  record views, the module status line, Spreadsheet, Comms and Part Design.
 #   - [2026-11-16] Styles for the tab row's +, the empty page's Create New panel, browser pages and the
@@ -269,14 +271,24 @@ PAGE_HEADING_QSS = f"""
 }}
 #page_title_edit:hover {{ border-color: {EDGE_COLOR}; }}
 #page_title_edit:focus {{ background: {BACKGROUND_COLOR}; border-color: {ACCENT_HIGHLIGHT_COLOR}; }}
-/* Empty page: "Create New" with New Module / New Browser */
+/* Empty page: "Create New" with New Module / New Browser / New Canvas */
 #create_new_panel {{ background: transparent; }}
 #create_new_label {{ font-size: 18px; font-weight: 600; color: {TEXT_COLOR}; background: transparent; padding-bottom: 6px; }}
-#new_module_btn, #new_browser_btn {{
+#new_module_btn, #new_browser_btn, #new_canvas_btn {{
     background: transparent; border: 1px dashed {EDGE_COLOR}; border-radius: 4px; padding: 10px 22px;
     font-size: 13px; color: {TEXT_COLOR}; min-width: 160px;
 }}
-#new_module_btn:hover, #new_browser_btn:hover {{ background: {HOVER_COLOR}; border-color: {ACCENT_HIGHLIGHT_COLOR}; }}
+#new_module_btn:hover, #new_browser_btn:hover, #new_canvas_btn:hover {{ background: {HOVER_COLOR}; border-color: {ACCENT_HIGHLIGHT_COLOR}; }}
+/* Canvas pages (infinite_canvas_page.py): module cards on an endless grid */
+#infinite_canvas_page_panel, #infinite_canvas_panel {{ background: {BACKGROUND_COLOR}; }}
+#module_card_panel {{ background: {PANEL_COLOR}; border: 1px solid {EDGE_COLOR}; border-radius: 4px; }}
+#module_card_panel[is_active="true"] {{ border-color: {ACCENT_HIGHLIGHT_COLOR}; }}
+#card_header_panel {{ background: {HEADER_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; border-top-left-radius: 4px; border-top-right-radius: 4px; }}
+#card_title_label {{ color: {TEXT_COLOR}; font-weight: 600; background: transparent; }}
+#card_resize_grip {{ background: transparent; }}
+#canvas_controls_panel {{ background: {HEADER_COLOR}; border: 1px solid {EDGE_COLOR}; border-radius: 4px; }}
+#canvas_control_btn {{ background: transparent; border: none; border-radius: 3px; padding: 2px 7px; color: {TEXT_COLOR}; }}
+#canvas_control_btn:hover {{ background: {HOVER_COLOR}; }}
 /* Browser pages */
 #browser_page_panel {{ background: {BACKGROUND_COLOR}; }}
 #browser_toolbar_panel, #find_bar_panel {{ background: {PANEL_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; }}
@@ -287,6 +299,9 @@ PAGE_HEADING_QSS = f"""
 #browser_progress_bar {{ background: transparent; border: none; }}
 #browser_progress_bar::chunk {{ background: {ACCENT_HIGHLIGHT_COLOR}; }}
 #browser_unavailable_label {{ color: {MUTED_TEXT_COLOR}; qproperty-alignment: AlignCenter; padding: 20px; }}
+/* Web app module: options button floating over the page while the browser bar is hidden */
+#web_app_options_btn {{ background: {HEADER_COLOR}; border: 1px solid {EDGE_COLOR}; border-radius: 4px; padding: 1px 7px; font-size: 14px; }}
+#web_app_options_btn:hover {{ background: {HOVER_COLOR}; }}
 """
 # --- END [3.6] ---
 

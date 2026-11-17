@@ -10,15 +10,30 @@
 #   3. Places the sidebar and the page area side by side, split by a draggable seam; slides the
 #      sidebar closed and open again, remembering how wide it was.
 #   4. Frameless window with an integrated title bar and an IDE-style status bar.
+#   5. Several windows: a Workspace holds what windows share (page store, page widgets, parked pages);
+#      any tab can move to a new window (tab menu, or drag it out of every window) - the new window is a
+#      full DevOS window (sidebar, tabs, status bar) holding just that page. A page lives in one tab across
+#      all windows: opening it anywhere brings its window forward.
 # CONTRACT:
 #   - Requires: app.data.store (database.get_database, pages.PageStore), app.ui.pages (CanvasPage,
-#               PlaceholderPage), app.ui.widgets (sidebar.Sidebar, tab_area.TabArea, title_bar,
+#               BrowserPage, InfiniteCanvasPage, PlaceholderPage), app.ui.widgets.tab_group (PAGE_MIME_TYPE,
+#               note_tab_drag_over_window), app.ui.widgets (sidebar.Sidebar, tab_area.TabArea, title_bar,
 #               status_bar.SystemStatusBar), assets/icons (sidebar_open, page, settings .svg),
 #               QSS selector #open_sidebar_btn
-#   - Exposes: MainWindow (QMainWindow), created and shown by app/main.py; show_page(page_id); set_log_visible(); open_tool_bag() (Ctrl+K);
-#              create_page(tab_group=None); rename_page(page_id, title, is_automatic=False); convert_to_browser(page_id);
-#              open_browser_tab(url); page_store; SETTINGS_PAGE_ID
+#   - Exposes: MainWindow(workspace=None) (QMainWindow), created and shown by app/main.py (the first window
+#              makes the Workspace); show_page(page_id); set_log_visible(); open_tool_bag() (Ctrl+K);
+#              create_page(tab_group=None); rename_page(page_id, title, is_automatic=False);
+#              convert_page(page_id, kind); open_browser_tab(url); page_store; page_widgets; workspace;
+#              SETTINGS_PAGE_ID; Workspace with windows, open_in_new_window(page_id, source, at_cursor),
+#              window_with_page(page_id)
 # NOTES:
+#   - [2026-11-17] Several windows: Workspace (shared page store, page widgets, parked pages, log flush);
+#                  "Open in new window" / dragging a tab out of every window opens it in a new MainWindow;
+#                  renames, deletions and new pages reach every window's sidebar and tabs; a closing window
+#                  parks (and so suspends) its pages. The window accepts stray tab drops (a tab dropped on
+#                  the sidebar or status bar stays put instead of opening a new window).
+#   - [2026-11-17] convert_page(page_id, kind) replaces convert_to_browser(): New Browser and New Canvas
+#                  (InfiniteCanvasPage) both turn an empty page into another kind in the same tab.
 #   - [2026-11-16] Ctrl+K opens the tool bag in run mode for the module last clicked (tool_bag.note_pressed
 #                  listens on mouse_hub).
 #   - [2026-11-16] Browser pages: a page's kind decides what page_widget() builds (CanvasPage or BrowserPage);
@@ -77,7 +92,9 @@
 # - INITIAL_CONTENT_WIDTH_PX (int | px): Starting splitter share for the page area; only its ratio to
 #   the sidebar width matters (default: 1000).
 # - page id (int): A user page's database id (>= 1); SETTINGS_PAGE_ID (0) is the settings page.
-# - page_widgets (dict[int, QWidget]): Pages built so far (built on first open, kept until deleted).
+# - page_widgets (dict[int, QWidget]): Pages built so far (built on first open, kept until deleted); one
+#   dict for the whole workspace, whichever window shows them.
+# - workspace: Everything DevOS windows share (Workspace); the first window creates it.
 # - _pending_animation_callback (callable | None): Function run once when the running slide finishes.
 # - _saved_sidebar_width_px (int | px): Sidebar width remembered on collapse, restored on expand.
 # - SPLITTER_HANDLE_WIDTH_PX (int | px): Grab width of the seam between sidebar and pages (default: 4).
@@ -103,6 +120,9 @@
 #    3.10 expand_sidebar
 #    3.11 animation_helpers
 #    3.12 title_bar
+#    3.13 window_drops_and_close
+# 4. WORKSPACE
+#    4.1 workspace
 # ==============================================================================
 
 # ==============================================================================
@@ -153,23 +173,26 @@ Notes:
 # ==============================================================================
 # [2.1] imports
 # ==============================================================================
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, Qt, QTimer, QVariantAnimation
+from PySide6.QtGui import QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QSplitter, QToolButton, QVBoxLayout, QWidget
 
 from app.data.activity_log import get_activity_log
 
 from app.data.store.database import get_database
-from app.data.store.pages import PAGE_KIND_BROWSER, PAGE_KIND_ICONS, UNTITLED_TITLE, PageStore
+from app.data.store.pages import (
+    PAGE_KIND_BROWSER, PAGE_KIND_ICONS, PAGE_KIND_INFINITE_CANVAS, PAGE_KIND_NOUNS, UNTITLED_TITLE, PageStore,
+)
 from app.ui.pages.browser_page import BrowserPage
 from app.ui.pages.canvas_page import CanvasPage
+from app.ui.pages.infinite_canvas_page import InfiniteCanvasPage
 from app.ui.pages.placeholder_page import PlaceholderPage
 from app.ui.tool_bag import ToolBagPopup, active_module, note_pressed
 from app.ui.widgets.sidebar import ICON_SIZE, Sidebar, load_icon
 from app.ui.widgets.log_panel import LogPanel
 from app.ui.widgets.status_bar import SystemStatusBar
 from app.ui.widgets.tab_area import TabArea
-from app.ui.widgets.tab_group import TabGroup
+from app.ui.widgets.tab_group import PAGE_MIME_TYPE, TabGroup, note_tab_drag_over_window
 from app.ui.widgets.title_bar import TitleBarDragFilter, WindowControls, WindowFrame, mark_title_bar_region
 from app.ui.window_events import mouse_hub
 # --- END [2.1] ---
@@ -193,16 +216,20 @@ class MainWindow(QMainWindow):
 # ==============================================================================
 # [3.2] init_window
 # ==============================================================================
-    def __init__(self) -> None:
+    def __init__(self, workspace: "Workspace | None" = None) -> None:
         super().__init__()
         self.setWindowTitle(self.APP_TITLE)
         # No system title bar: the sidebar header + top tab rows are the title bar (see [3.12]).
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.resize(self.WINDOW_WIDTH_PX, self.WINDOW_HEIGHT_PX)
+        self.setAcceptDrops(True)                     # stray tab drops land here, see [3.13]
 
-        self.database = get_database()
-        self.page_store = PageStore(self.database)
-        self.page_widgets: dict[int, QWidget] = {}
+        is_first_window = workspace is None
+        self.workspace = workspace or Workspace()
+        self.workspace.windows.append(self)
+        self.database = self.workspace.database
+        self.page_store = self.workspace.page_store
+        self.page_widgets = self.workspace.page_widgets
 
         # Order matters: the splitter needs the tab area and sidebar; the tab area talks to the sidebar.
         self._build_tab_area()
@@ -212,17 +239,15 @@ class MainWindow(QMainWindow):
         self._build_title_bar()
 
         self.log = get_activity_log()
-        self.log_flush_timer = QTimer(self, interval=self.LOG_FLUSH_INTERVAL_MS, timeout=self.log.flush)
-        self.log_flush_timer.start()
         if self.database.get_preference("log_panel_open", False):
             self.set_log_visible(True)
-        mouse_hub().pressed.connect(note_pressed)     # the tool bag runs tools on the module last clicked
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self.open_tool_bag)
 
-        start_pages = self.page_store.favorites() or self.page_store.pages()
-        self.log.info("pages", f"{len(self.page_store.pages())} pages in {len(self.page_store.folders())} folders")
-        if start_pages:
-            self.show_page(start_pages[0].page_id)
+        if is_first_window:
+            start_pages = self.page_store.favorites() or self.page_store.pages()
+            self.log.info("pages", f"{len(self.page_store.pages())} pages in {len(self.page_store.folders())} folders")
+            if start_pages:
+                self.show_page(start_pages[0].page_id)
 # --- END [3.2] ---
 
 # ==============================================================================
@@ -230,10 +255,12 @@ class MainWindow(QMainWindow):
 # ==============================================================================
     def _build_tab_area(self) -> None:
         # --- Tabs on top, pages underneath; this window supplies the pages (see [3.6]) ---
-        self.tab_area = TabArea(self)
+        self.tab_area = TabArea(self, parked_pages_panel=self.workspace.parked_pages_panel)
         self.tab_area.current_page_changed.connect(self._on_current_page_changed)
         self.tab_area.create_page_requested.connect(self.create_page)
         self.tab_area.rename_requested.connect(self.start_rename)
+        self.tab_area.page_to_new_window.connect(
+            lambda page_id, at_cursor: self.workspace.open_in_new_window(page_id, self, at_cursor))
 
         self.open_sidebar_btn = QToolButton(objectName="open_sidebar_btn")
         self.open_sidebar_btn.setIcon(load_icon("sidebar_open.svg"))
@@ -252,8 +279,8 @@ class MainWindow(QMainWindow):
         self.nav_sidebar_panel = Sidebar(self.page_store)
         self.nav_sidebar_panel.page_selected.connect(self.show_page)
         self.nav_sidebar_panel.page_created.connect(self._on_sidebar_page_created)
-        self.nav_sidebar_panel.page_renamed.connect(self._show_title)
-        self.nav_sidebar_panel.page_deleted.connect(self._on_page_deleted)
+        self.nav_sidebar_panel.page_renamed.connect(self.workspace.show_title_everywhere)
+        self.nav_sidebar_panel.page_deleted.connect(self.workspace.forget_page)
         self.nav_sidebar_panel.settings_requested.connect(lambda: self.show_page(self.SETTINGS_PAGE_ID))
         self.nav_sidebar_panel.close_requested.connect(self.collapse_sidebar)
 # --- END [3.4] ---
@@ -316,45 +343,63 @@ class MainWindow(QMainWindow):
         return page.icon if page else PAGE_KIND_ICONS["canvas"]
 
     def page_widget(self, page_id: int) -> QWidget:
-        """Build a page the first time it is opened: a CanvasPage (the page template) or a BrowserPage."""
+        """Build a page the first time it is opened (in any window): the class its kind asks for."""
         if page_id not in self.page_widgets:
             if page_id == self.SETTINGS_PAGE_ID:
                 widget = PlaceholderPage("Settings", "Configuration options.")
             else:
                 page = self.page_store.page(page_id)
                 with get_activity_log().step("pages", f"Open page “{self.page_title(page_id)}”"):
-                    if page is not None and page.kind == PAGE_KIND_BROWSER:
-                        widget = self._build_browser_page(page_id)
-                    else:
-                        widget = self._build_canvas_page(page_id)
+                    widget = self._build_page(page_id, page.kind if page is not None else None)
             self.page_widgets[page_id] = widget
         return self.page_widgets[page_id]
 
-    def _build_canvas_page(self, page_id: int) -> CanvasPage:
+    def _build_page(self, page_id: int, kind: str | None) -> QWidget:
+        if kind == PAGE_KIND_BROWSER:
+            return self._build_browser_page(page_id)
+        if kind == PAGE_KIND_INFINITE_CANVAS:
+            widget = InfiniteCanvasPage(page_id, self.page_title(page_id), self.database)
+            widget.title_edited.connect(lambda title: self.rename_page(page_id, title))
+            return widget
         widget = CanvasPage(page_id, self.page_title(page_id), self.database)
         widget.title_edited.connect(lambda title: self.rename_page(page_id, title))
-        widget.browser_requested.connect(lambda: self.convert_to_browser(page_id))
+        widget.kind_requested.connect(lambda new_kind: self.convert_page(page_id, new_kind))
         return widget
 
     def _build_browser_page(self, page_id: int) -> BrowserPage:
         widget = BrowserPage(page_id, self.page_store.page_state(page_id),
                              save_state=lambda state: self.page_store.save_page_state(page_id, state),
-                             open_new_tab=lambda: self.open_browser_tab("about:blank"))
+                             open_new_tab=lambda: self._window_for(page_id).open_browser_tab("about:blank"))
         widget.title_changed.connect(lambda title: self.rename_page(page_id, title, is_automatic=True))
         return widget
+
+    def _window_for(self, page_id: int) -> "MainWindow":
+        """The window showing this page now (pages move between windows), else this one."""
+        return self.workspace.window_with_page(page_id) or self
 # --- END [3.6] ---
 
 # ==============================================================================
 # [3.7] page_lifecycle
 # ==============================================================================
     def show_page(self, page_id: int) -> None:
-        """Open a page in a tab (or switch to its tab if it is already open)."""
+        """Open a page in a tab (or switch to its tab if it is already open - in another window too)."""
+        owner = self.workspace.window_with_page(page_id)
+        if owner is not None and owner is not self:
+            owner.tab_area.open_page(page_id)
+            owner.bring_forward()
+            return
         self.tab_area.open_page(page_id)
+
+    def bring_forward(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def create_page(self, tab_group: TabGroup | None = None) -> int:
         """New untitled page, opened in tab_group (or the active pane) with its name ready to type."""
         page_id = self.page_store.create_page()
-        self.nav_sidebar_panel.refresh()
+        self.workspace.refresh_sidebars()
         if tab_group is None:
             self.tab_area.open_page(page_id)
         else:
@@ -362,32 +407,35 @@ class MainWindow(QMainWindow):
         self.start_rename(page_id)
         return page_id
 
-    def convert_to_browser(self, page_id: int) -> None:
-        """New Browser: this (empty) page becomes a browser page, in the same tab."""
+    def convert_page(self, page_id: int, kind: str) -> None:
+        """New Browser / New Canvas: this (empty) page becomes another kind of page, in the same tab."""
         title = self.page_title(page_id)
-        with get_activity_log().step("pages", f"Turn “{title}” into a browser"):
-            self.page_store.set_page_kind(page_id, PAGE_KIND_BROWSER)
-            self.page_store.save_page_state(page_id, {"auto_title": title.startswith(UNTITLED_TITLE)})
-            widget = self._build_browser_page(page_id)
+        window = self._window_for(page_id)
+        with get_activity_log().step("pages", f"Turn “{title}” into a {PAGE_KIND_NOUNS.get(kind, kind)}"):
+            self.page_store.set_page_kind(page_id, kind)
+            if kind == PAGE_KIND_BROWSER:
+                self.page_store.save_page_state(page_id, {"auto_title": title.startswith(UNTITLED_TITLE)})
+            widget = self._build_page(page_id, kind)
         old_widget = self.page_widgets.get(page_id)
         self.page_widgets[page_id] = widget
-        replaced = self.tab_area.replace_page_widget(page_id, widget)
+        replaced = window.tab_area.replace_page_widget(page_id, widget)
         for leftover in {old_widget, replaced} - {None}:
             leftover.setParent(None)
             leftover.deleteLater()
-        self.tab_area.set_page_icon(page_id, PAGE_KIND_ICONS[PAGE_KIND_BROWSER])
-        self.nav_sidebar_panel.refresh()
-        self.nav_sidebar_panel.select_page(page_id)
+        window.tab_area.set_page_icon(page_id, PAGE_KIND_ICONS[kind])
+        self.workspace.refresh_sidebars()
+        window.nav_sidebar_panel.select_page(page_id)
         widget.start_title_edit()
 
     def open_browser_tab(self, url: str | None = None) -> BrowserPage:
         """A new browser page in the active pane (links that open a new window land here)."""
         page_id = self.page_store.create_page(kind=PAGE_KIND_BROWSER, state={"url": url} if url else None)
-        self.nav_sidebar_panel.refresh()
+        self.workspace.refresh_sidebars()
         self.tab_area.open_page(page_id)
         return self.page_widget(page_id)
 
     def _on_sidebar_page_created(self, page_id: int) -> None:
+        self.workspace.refresh_sidebars(except_window=self)
         self.show_page(page_id)
         self.start_rename(page_id)
 
@@ -395,7 +443,7 @@ class MainWindow(QMainWindow):
         """Focus the page's own title field (a "name it now" prompt)."""
         if page_id == self.SETTINGS_PAGE_ID:
             return
-        self.show_page(page_id)
+        self._window_for(page_id).show_page(page_id)
         start_edit = getattr(self.page_widget(page_id), "start_title_edit", None)
         if start_edit is not None:
             QTimer.singleShot(0, start_edit)                 # after the tab switch has painted
@@ -404,8 +452,7 @@ class MainWindow(QMainWindow):
         """Rename a page everywhere: store, sidebar, tab, heading, window title. Automatic renames (a
         browser following its website's title) are logged at debug level."""
         title = self.page_store.rename_page(page_id, title, quiet=is_automatic)
-        self.nav_sidebar_panel.set_page_title(page_id, title)
-        self._show_title(page_id, title)
+        self.workspace.show_title_everywhere(page_id, title)
         return title
 
     def _show_title(self, page_id: int, title: str) -> None:
@@ -415,13 +462,6 @@ class MainWindow(QMainWindow):
             set_title(title)
         if self.tab_area.active_tab_group is not None and self.tab_area.active_tab_group.current_page_index() == page_id:
             self.setWindowTitle(f"{self.APP_TITLE} — {title}")
-
-    def _on_page_deleted(self, page_id: int) -> None:
-        self.tab_area.forget_page(page_id)
-        widget = self.page_widgets.pop(page_id, None)
-        if widget is not None:
-            widget.setParent(None)
-            widget.deleteLater()
 
     def _on_current_page_changed(self, page_id: int) -> None:
         """Keep the sidebar highlight and window title in step with the selected tab."""
@@ -548,4 +588,114 @@ class MainWindow(QMainWindow):
             is_filling_screen = self.isMaximized() or self.isFullScreen()
             self.window_controls.sync_state()
             self.window_frame_panel.set_edge_visible(not is_filling_screen)
+        elif event.type() == QEvent.Type.ActivationChange and self.isActiveWindow() and len(self.workspace.windows) > 1:
+            self.nav_sidebar_panel.refresh()          # folders / favourites may have changed in another window
 # --- END [3.12] ---
+
+# ==============================================================================
+# [3.13] window_drops_and_close
+# ==============================================================================
+    # A dragged tab over any part of this window that isn't a pane (sidebar, status bar ...) is "inside":
+    # dropping it there does nothing, instead of opening a new window (tab_group.py, "drag over window").
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(PAGE_MIME_TYPE):
+            note_tab_drag_over_window(True)
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(PAGE_MIME_TYPE):
+            note_tab_drag_over_window(True)
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        note_tab_drag_over_window(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.mimeData().hasFormat(PAGE_MIME_TYPE):
+            event.acceptProposedAction()              # nothing to do: the tab stays where it was
+        else:
+            super().dropEvent(event)
+
+    def closeEvent(self, event) -> None:
+        """A closing window parks its pages (they stop until opened again); other windows carry on."""
+        self.tab_area.park_all()
+        if self in self.workspace.windows:
+            self.workspace.windows.remove(self)
+        super().closeEvent(event)
+# --- END [3.13] ---
+
+
+# ==============================================================================
+# [4.1] workspace
+# ==============================================================================
+class Workspace(QObject):
+    """What every DevOS window shares: the page store, the page widgets (a page shows in one tab across all
+    windows), the hidden panel where pages without a tab wait, and the log flush timer."""
+
+    NEW_WINDOW_OFFSET_PX = 40
+    NEW_WINDOW_WIDTH_PX = 1000
+    NEW_WINDOW_HEIGHT_PX = 700
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.database = get_database()
+        self.page_store = PageStore(self.database)
+        self.page_widgets: dict[int, QWidget] = {}
+        self.windows: list[MainWindow] = []
+        self.parked_pages_panel = QWidget()           # top-level and never shown: parked pages outlive windows
+        self.parked_pages_panel.hide()
+        self.log = get_activity_log()
+        self.log_flush_timer = QTimer(self, interval=MainWindow.LOG_FLUSH_INTERVAL_MS, timeout=self.log.flush)
+        self.log_flush_timer.start()
+        mouse_hub().pressed.connect(note_pressed)     # the tool bag runs tools on the module last clicked
+
+    def window_with_page(self, page_id: int) -> MainWindow | None:
+        for window in self.windows:
+            if page_id in window.tab_area.page_indices():
+                return window
+        return None
+
+    def open_in_new_window(self, page_id: int, source: MainWindow | None = None, at_cursor: bool = False) -> MainWindow:
+        """Move a page into a new DevOS window of its own (it keeps running: no reload)."""
+        owner = self.window_with_page(page_id)
+        if owner is not None:
+            owner.tab_area.release_page(page_id)
+        window = MainWindow(self)
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        window.resize(min(self.NEW_WINDOW_WIDTH_PX, source.width()) if source else self.NEW_WINDOW_WIDTH_PX,
+                      min(self.NEW_WINDOW_HEIGHT_PX, source.height()) if source else self.NEW_WINDOW_HEIGHT_PX)
+        if at_cursor:
+            window.move(QCursor.pos() - QPoint(120, 18))   # (Wayland compositors place windows themselves)
+        elif source is not None:
+            window.move(source.pos() + QPoint(self.NEW_WINDOW_OFFSET_PX, self.NEW_WINDOW_OFFSET_PX))
+        window.show()
+        window.tab_area.open_page(page_id)
+        self.log.info("pages", f"Opened “{window.page_title(page_id)}” in a new window")
+        return window
+
+    def refresh_sidebars(self, except_window: MainWindow | None = None) -> None:
+        for window in self.windows:
+            if window is not except_window:
+                window.nav_sidebar_panel.refresh()
+
+    def show_title_everywhere(self, page_id: int, title: str) -> None:
+        """A page was renamed: every window's sidebar, tab, page heading and window title."""
+        for window in self.windows:
+            window.nav_sidebar_panel.set_page_title(page_id, title)
+            window._show_title(page_id, title)
+
+    def forget_page(self, page_id: int) -> None:
+        """A page was deleted (from some sidebar): close its tab wherever it is, dispose of its widget."""
+        for window in self.windows:
+            window.tab_area.forget_page(page_id)
+        widget = self.page_widgets.pop(page_id, None)
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
+        self.refresh_sidebars()
+# --- END [4.1] ---

@@ -15,6 +15,7 @@
 #   - Exposes: WindowControls(window), WindowFrame(window, content), TitleBarDragFilter(window),
 #              TITLE_BAR_REGION_PROPERTY, mark_title_bar_region(widget)
 # NOTES:
+#   - [2026-11-17] TitleBarDragFilter leaves the mouse hub when its window is deleted (DevOS has several windows).
 #   - [2026-11-16] TitleBarDragFilter is no longer installed on the QApplication (PySide crashed on Qt
 #                  WebEngine's internal objects); it registers with mouse_hub() and sees the window's presses.
 #   - [2026-11-15] Created. Moving/resizing uses QWindow.startSystemMove()/startSystemResize(), so the
@@ -202,7 +203,9 @@ class TitleBarDragFilter(QObject):
     def __init__(self, window: QWidget) -> None:
         super().__init__(window)
         self.window_ = window
-        mouse_hub().add_press_handler(self.handle_press)
+        handler = self.handle_press
+        mouse_hub().add_press_handler(handler)
+        window.destroyed.connect(lambda *_: mouse_hub().remove_press_handler(handler))
 
     def _title_bar_region(self, widget: QWidget, local_position: QPoint) -> QWidget | None:
         """The marked region if this press is on empty title-bar space, else None."""

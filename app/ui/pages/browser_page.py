@@ -9,6 +9,8 @@
 #   3. Find bar (Ctrl+F), zoom (Ctrl+= / Ctrl+- / Ctrl+0), ⋯ menu (copy address, open in system browser,
 #      set as home page); links that open a new window open a new browser page (open_new_tab callback).
 #   4. Load failures are announced in the log; without Qt WebEngine the page explains why instead of crashing.
+#   5. For hosts (the Web App module): set_toolbar_visible(), fill_menu(menu, ...) (the ⋯ menu's actions, plus
+#      navigation when the bar is hidden), extend_context_menu (a hook that adds to the page's right-click menu).
 # CONTRACT:
 #   - Requires: app.ui.web_support (browser_profile, web_engine_unavailable_reason, address_to_url, HOME_URL),
 #               app.ui.ui_tools (tool_button, set_style_property), app.data.activity_log, app.data.store.database
@@ -16,8 +18,12 @@
 #               #browser_toolbar_panel, #browser_address_edit, #browser_nav_btn, #browser_progress_bar,
 #               #find_bar_panel, #browser_unavailable_label
 #   - Exposes: BrowserPage(page_id, state, save_state, open_new_tab=None, profile=None, home_url=None) (QWidget) with signal title_changed(str);
-#              navigate(text); set_title(title); start_title_edit(); auto_title; web_view (None if unavailable)
+#              navigate(text); set_title(title); start_title_edit(); auto_title; web_view (None if unavailable);
+#              set_toolbar_visible(is_visible); fill_menu(menu, with_navigation=False, with_set_home=True);
+#              extend_context_menu (callable(QMenu) | None)
 # NOTES:
+#   - [2026-11-17] fill_menu() (the ⋯ menu's actions, shared with web apps), set_toolbar_visible() and the
+#                  extend_context_menu hook, so a web app can hide the browser bar and still offer its options.
 #   - [2026-11-16] profile= (a container's own profile) and home_url= (fixed home) so the Web App module
 #                  reuses this page inside a module tile.
 #   - [2026-11-16] Created ("New Browser" on empty pages). State saved with the page: url, zoom, auto_title.
@@ -84,6 +90,14 @@ def _web_view_class():
             handler = self.browser_page.open_new_tab
             new_page = handler() if handler is not None else None
             return new_page.web_view if new_page is not None and new_page.web_view is not None else self
+
+        def contextMenuEvent(self, event) -> None:
+            """The page's own right-click menu, plus whatever the host adds (extend_context_menu)."""
+            menu = self.createStandardContextMenu()
+            if self.browser_page.extend_context_menu is not None:
+                self.browser_page.extend_context_menu(menu)
+            menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            menu.popup(event.globalPos())
     return WebView
 # --- END [2.1] ---
 
@@ -105,6 +119,7 @@ class BrowserPage(QWidget):
         self._last_auto_title = ""
         self.log = get_activity_log()
         self.web_view = None
+        self.extend_context_menu: Callable[[QMenu], None] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -217,7 +232,24 @@ class BrowserPage(QWidget):
 
     def _show_menu(self) -> None:
         menu = QMenu(self)
-        url = self.web_view.url().toString() if self.web_view else ""
+        self.fill_menu(menu)
+        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+
+    def fill_menu(self, menu: QMenu, with_navigation: bool = False, with_set_home: bool = True) -> None:
+        """The ⋯ menu's actions (find, zoom, address); with_navigation adds back / forward / reload / home for
+        hosts that hide the bar."""
+        view = self.web_view
+        url = view.url().toString() if view else ""
+        if with_navigation and view is not None:
+            back = menu.addAction("Back  (Alt+Left)")
+            back.triggered.connect(view.back)
+            back.setEnabled(view.history().canGoBack())
+            forward = menu.addAction("Forward  (Alt+Right)")
+            forward.triggered.connect(view.forward)
+            forward.setEnabled(view.history().canGoForward())
+            menu.addAction("Reload  (F5)").triggered.connect(view.reload)
+            menu.addAction("Home").triggered.connect(lambda: self.navigate(self.home_url()))
+            menu.addSeparator()
         menu.addAction("Find in page  (Ctrl+F)").triggered.connect(self.open_find)
         menu.addAction("Zoom in  (Ctrl+=)").triggered.connect(lambda: self.step_zoom(1))
         menu.addAction("Zoom out  (Ctrl+-)").triggered.connect(lambda: self.step_zoom(-1))
@@ -225,8 +257,12 @@ class BrowserPage(QWidget):
         menu.addSeparator()
         menu.addAction("Copy address").triggered.connect(lambda: QApplication.clipboard().setText(url))
         menu.addAction("Open in system browser").triggered.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
-        menu.addAction("Use as home page").triggered.connect(self._set_home)
-        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+        if with_set_home:
+            menu.addAction("Use as home page").triggered.connect(self._set_home)
+
+    def set_toolbar_visible(self, is_visible: bool) -> None:
+        """Show / hide the navigation bar (a web app looks like part of DevOS without it)."""
+        self.browser_toolbar_panel.setVisible(is_visible)
 
     def _set_home(self) -> None:
         url = self.web_view.url().toString()

@@ -11,8 +11,12 @@
 #               (MODULE_LIBRARY, MODULE_BY_ID, create_module), app.data.store.database.Database,
 #               app.data.activity_log, QSS selectors #module_canvas_panel, #module_tile_panel
 #   - Exposes: ModuleCanvas(database=None, page_key=None, library=MODULE_LIBRARY); add_library_module();
-#              add_module() (empty tile); load_saved_layout(); save_layout(); plus TileCanvas API (emptied); ModuleTile
+#              add_module() (empty tile); load_saved_layout(); save_layout(); plus TileCanvas API (emptied); ModuleTile;
+#              dock_module_tools(tile), add_toolbar_menu(menu, tool_dock), library_choices(library),
+#              create_library_module(kind, database, instance_id) (shared with the infinite canvas's cards)
 # NOTES:
+#   - [2026-11-17] Tool-dock wiring, the "Add toolbar" menu, the picker choices and module creation moved into
+#                  helpers so the infinite canvas's module cards share them.
 #   - [2026-11-16] Module tiles hold their module in a ToolDock: grip menu → Add toolbar (top / bottom / left /
 #                  right / floating); trays are saved in the module's settings.
 #   - [2026-11-16] The last module tile can be closed (keeps_last_tile = False): the page then shows its
@@ -62,6 +66,36 @@ from app.ui.widgets.tiling_layout import DROP_ZONE_RIGHT
 # ==============================================================================
 # [2.1] module_tile
 # ==============================================================================
+def library_choices(library: tuple[ModuleSpec, ...] = MODULE_LIBRARY) -> list[tuple[str, str, str]]:
+    """(kind, title, description) for every module in the library: what empty tiles / cards offer."""
+    return [(spec.module_type_id, spec.title, spec.description) for spec in library]
+
+
+def create_library_module(kind: str, database: Database, instance_id: str | None) -> tuple[QWidget, str, str]:
+    """A module app with its data context: (view, title, instance_id) - the shape create_content returns."""
+    view, context = create_module(kind, database, instance_id)
+    return view, MODULE_BY_ID[kind].title, context.instance_id
+
+
+def dock_module_tools(tile: CanvasTile) -> ToolDock:
+    """Put a ToolDock in the tile's body (hidden until a module arrives) and make it the content's place, so
+    the user can add toolbars around the module. Call right after the tile is built."""
+    tool_dock = ToolDock(tile.body_panel)
+    tool_dock.hide()                                   # the picker shows first
+    tile.body_layout.addWidget(tool_dock)
+    tile.body_layout = tool_dock.center_layout
+    return tool_dock
+
+
+def add_toolbar_menu(menu: QMenu, tool_dock: ToolDock) -> None:
+    """An "Add toolbar" submenu (top / bottom / left / right / floating) for a module's tool dock."""
+    toolbar_menu = menu.addMenu("Add toolbar")
+    toolbar_menu.setEnabled(tool_dock.can_hold_tools)
+    for side in SIDES:
+        toolbar_menu.addAction(SIDE_TITLES[side]).triggered.connect(
+            lambda _checked=False, side=side: tool_dock.add_tray(side))
+
+
 class ModuleTile(CornerControlsTile):
     """A module tile: no title bar; fading corner controls (grip, split, close) over the module; the
     module sits in a ToolDock so the user can add toolbars around it (grip menu → Add toolbar)."""
@@ -71,10 +105,7 @@ class ModuleTile(CornerControlsTile):
 
     def __init__(self, tile_id: int, mime_type: str, choices: list[tuple[str, str, str]]) -> None:
         super().__init__(tile_id, mime_type, choices, "module_tile_panel")
-        self.tool_dock = ToolDock(self.body_panel)
-        self.tool_dock.hide()                          # until a module arrives (the picker shows first)
-        self.body_layout.addWidget(self.tool_dock)
-        self.body_layout = self.tool_dock.center_layout
+        self.tool_dock = dock_module_tools(self)
 
     def set_content(self, content_widget: QWidget, title: str, kind: str, instance_id: str | None = None) -> None:
         super().set_content(content_widget, title, kind, instance_id)
@@ -82,11 +113,7 @@ class ModuleTile(CornerControlsTile):
         self.tool_dock.show()
 
     def extend_menu(self, menu: QMenu) -> None:
-        toolbar_menu = menu.addMenu("Add toolbar")
-        toolbar_menu.setEnabled(self.tool_dock.can_hold_tools)
-        for side in SIDES:
-            toolbar_menu.addAction(SIDE_TITLES[side]).triggered.connect(
-                lambda _checked=False, side=side: self.tool_dock.add_tray(side))
+        add_toolbar_menu(menu, self.tool_dock)
 # --- END [2.1] ---
 
 
@@ -101,7 +128,7 @@ class ModuleCanvas(TileCanvas):
 
     def __init__(self, database: Database | None = None, page_key: str | None = None,
                  library: tuple[ModuleSpec, ...] = MODULE_LIBRARY, parent: QWidget | None = None) -> None:
-        choices = [(spec.module_type_id, spec.title, spec.description) for spec in library] if database else []
+        choices = library_choices(library) if database else []
         super().__init__(choices, "module_canvas_panel", parent)
         self.database, self.page_key, self.library = database, page_key, library
         self.layout_changed.connect(self.save_layout)
@@ -113,8 +140,7 @@ class ModuleCanvas(TileCanvas):
     def create_content(self, kind: str, instance_id: str | None, state: dict | None):
         if self.database is None:
             raise RuntimeError("ModuleCanvas needs a database to create library modules")
-        view, context = create_module(kind, self.database, instance_id)
-        return view, MODULE_BY_ID[kind].title, context.instance_id
+        return create_library_module(kind, self.database, instance_id)
 
     def add_library_module(self, module_type_id: str, beside: CanvasTile | None = None,
                            drop_zone: str = DROP_ZONE_RIGHT, instance_id: str | None = None) -> CanvasTile:

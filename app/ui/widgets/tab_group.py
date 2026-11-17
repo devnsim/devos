@@ -8,6 +8,7 @@
 #      previews the landing spot while a tab hovers.
 #   4. Offers a "split" button (new pane to the right) and a "close pane" button.
 #   5. A "+" right after the last tab creates a new page (same as the sidebar's +).
+#   6. Tab menu "Open in new window"; a tab dropped outside every DevOS window asks for a new window too.
 # CONTRACT:
 #   - Requires: app.ui.widgets.sidebar (ICON_SIZE, load_icon), app.ui.widgets.tiling_layout
 #               (drop zones, edge_zone_at, zone_preview_rect), assets/icons/tab_close.svg,
@@ -20,9 +21,13 @@
 #              current_page_index(); step_tab(); tab_count(); set_empty_hint(); set_is_active();
 #              set_can_close_pane(); add_leading_widget(); add_trailing_widget(); set_page_title(); set_page_icon();
 #              replace_page_widget();
-#              signals create_page_requested(), rename_requested(int); PageTabBar; PAGE_MIME_TYPE; NO_PAGE_INDEX;
-#              DROP_ZONE_* and EDGE_DROP_ZONES
+#              signals create_page_requested(), rename_requested(int), new_window_requested(int, bool at_cursor);
+#              PageTabBar (signal dragged_out(int)); PAGE_MIME_TYPE; NO_PAGE_INDEX; DROP_ZONE_* and EDGE_DROP_ZONES;
+#              note_tab_drag_over_window(is_over) (windows that catch stray tab drops call it)
 # NOTES:
+#   - [2026-11-17] "Open in new window" in the tab menu, and a tab dropped outside every DevOS window opens in a
+#                  new window (new_window_requested). "Outside" = the drag ended unaccepted while no DevOS
+#                  window was under it (tracked from drag enter / leave; QCursor.pos() is stale on Wayland).
 #   - [2026-11-16] "+" (new_tab_btn) sits right after the last tab and creates a new page
 #                  (create_page_requested, like the sidebar's +); the tab bar no longer stretches, so the +
 #                  follows the tabs and the free space after it still drags the window.
@@ -53,6 +58,8 @@
 # - PAGE_MIME_TYPE (str): Drag-and-drop format for a tab; its payload is the page_index as text.
 # - pane: One TabGroup inside the TabArea workspace.
 # - tab_index (int): Position of a tab in this pane's tab row (changes when tabs are dragged).
+# - drag over window: Whether a dragged tab is currently over a DevOS window (a pane or a window's
+#   catch-all drop area); a drag that ends unaccepted while it is False was dropped outside the app.
 # ==============================================================================
 
 # ==============================================================================
@@ -124,6 +131,12 @@ from app.ui.widgets.tiling_layout import (  # noqa: F401  (edge zones re-exporte
 # ==============================================================================
 PAGE_MIME_TYPE = "application/x-devos-page"
 NO_PAGE_INDEX = -1
+_tab_drag = {"is_over_window": False}         # see "drag over window"
+
+
+def note_tab_drag_over_window(is_over: bool) -> None:
+    """A DevOS window (or a pane in it) saw a dragged tab enter (True) or leave (False)."""
+    _tab_drag["is_over_window"] = is_over
 
 # Where a dragged tab was dropped on a pane (see [4.7]).
 # Centre = add as a tab; edges = split the pane (constants from tiling_layout.py).
@@ -141,6 +154,7 @@ class PageTabBar(QTabBar):
     tab_double_clicked = Signal(int)    # tab_index
     drag_started = Signal()
     drag_finished = Signal()
+    dragged_out = Signal(int)           # page_index dropped outside every DevOS window
 
     DRAG_OUT_MARGIN_PX = 12
 
@@ -209,8 +223,11 @@ class PageTabBar(QTabBar):
                 break
 
         self.drag_started.emit()
-        drag.exec(Qt.DropAction.MoveAction)             # blocks until the tab is dropped or cancelled
+        note_tab_drag_over_window(True)                 # it starts over this window's tab row
+        result = drag.exec(Qt.DropAction.MoveAction)    # blocks until the tab is dropped or cancelled
         self.drag_finished.emit()
+        if result == Qt.DropAction.IgnoreAction and not _tab_drag["is_over_window"]:
+            self.dragged_out.emit(page_index)
 # --- END [3.3] ---
 
 
@@ -225,6 +242,7 @@ class TabGroup(QWidget):
     close_pane_requested = Signal()
     create_page_requested = Signal()
     rename_requested = Signal(int)       # page_index
+    new_window_requested = Signal(int, bool)   # page_index, at the mouse (dragged out) or beside this window
     drag_started = Signal()
     drag_finished = Signal()
 
@@ -276,6 +294,7 @@ class TabGroup(QWidget):
         self.page_tab_bar.tab_middle_clicked.connect(self._request_close_at)
         self.page_tab_bar.drag_started.connect(self.drag_started)
         self.page_tab_bar.drag_finished.connect(self.drag_finished)
+        self.page_tab_bar.dragged_out.connect(lambda page_index: self.new_window_requested.emit(page_index, True))
         self.page_tab_bar.tab_double_clicked.connect(
             lambda tab_index: self.rename_requested.emit(self.page_tab_bar.tabData(tab_index))
         )
@@ -436,6 +455,7 @@ class TabGroup(QWidget):
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasFormat(PAGE_MIME_TYPE):
             event.acceptProposedAction()
+            note_tab_drag_over_window(True)
             self._show_drop_preview(self._drop_zone_at(event.position().toPoint()))
         else:
             event.ignore()
@@ -443,10 +463,12 @@ class TabGroup(QWidget):
     def dragMoveEvent(self, event) -> None:
         if event.mimeData().hasFormat(PAGE_MIME_TYPE):
             event.acceptProposedAction()
+            note_tab_drag_over_window(True)
             self._show_drop_preview(self._drop_zone_at(event.position().toPoint()))
 
     def dragLeaveEvent(self, event) -> None:
         self.drop_overlay_panel.hide()
+        note_tab_drag_over_window(False)
 
     def dropEvent(self, event) -> None:
         self.drop_overlay_panel.hide()
@@ -531,6 +553,8 @@ class TabGroup(QWidget):
         page_index = self.page_tab_bar.tabData(tab_index)
         menu = QMenu(self)
         menu.addAction("Rename page").triggered.connect(lambda: self.rename_requested.emit(page_index))
+        menu.addAction("Open in new window").triggered.connect(lambda: self.new_window_requested.emit(page_index, False))
+        menu.addSeparator()
         menu.addAction("Close tab").triggered.connect(lambda: self.tab_close_requested.emit(page_index))
         menu.exec(self.page_tab_bar.mapToGlobal(position))
 

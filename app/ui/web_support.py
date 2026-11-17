@@ -10,13 +10,17 @@
 #   3. browser_profile(): persistent profile in <data folder>/browser; downloads go to the content
 #      library (kind from the file extension) and are announced in the log.
 #   4. address_to_url(text): what the address bar means - a URL, a host name, or a web search.
+#   5. set_web_views_suspended(root, is_suspended): a page that has no tab stops its web content (sound,
+#      video, scripts) by discarding its web views; they reload when the page is shown again.
 # CONTRACT:
 #   - Requires: PySide6 (QtWebEngineCore / QtWebEngineWidgets, optional), app.data.store.content
 #               (get_content_store, kind_for_path), app.data.store.database.data_directory, app.data.activity_log
 #   - Exposes: prepare_web_engine(), shutdown_web_engine(), web_engine_unavailable_reason(), browser_profile(), container_profile(name),
-#              container_names(), container_slug(), address_to_url(),
+#              container_names(), container_slug(), address_to_url(), set_web_views_suspended(root, is_suspended),
 #              HOME_URL, SEARCH_URL
 # NOTES:
+#   - [2026-11-17] set_web_views_suspended(): closed pages kept playing music (a YouTube Music web app went on
+#                  after every tab was closed). Discarded web views stop and free their memory.
 #   - [2026-11-16] shutdown_web_engine(): pages are deleted before their profiles on exit (the app and the test
 #                  run used to end in a Qt WebEngine segfault).
 #   - [2026-11-16] Containers: container_profile(name) gives a site its own persistent profile (separate logins)
@@ -29,6 +33,8 @@
 # - HOME_URL (str): Where a new browser page starts and Home goes (default: DuckDuckGo).
 # - SEARCH_URL (str): Search used when the address bar text isn't an address ({} = the query).
 # - profile: Qt WebEngine's store for cookies, cache, local storage and permissions.
+# - discarded (web view): Qt WebEngine's Discarded lifecycle state - the page's process is gone (no sound, no
+#   scripts, no memory); showing the view again reloads its address.
 # ==============================================================================
 
 # ==============================================================================
@@ -38,6 +44,7 @@
 #    1.2 availability
 #    1.3 profile_and_downloads
 #    1.4 address_to_url
+#    1.5 suspend_web_views
 # ==============================================================================
 
 # ==============================================================================
@@ -200,3 +207,29 @@ def address_to_url(text: str) -> str:
         return ("http://" if is_local else "https://") + text
     return SEARCH_URL.format(quote_plus(text))
 # --- END [1.4] ---
+
+
+# ==============================================================================
+# [1.5] suspend_web_views
+# ==============================================================================
+def set_web_views_suspended(root, is_suspended: bool) -> int:
+    """Discard (True) or wake (False) every web view inside `root`; returns how many changed. Only hidden
+    views can be discarded (Qt's rule) - visible ones are left alone."""
+    if _profile is None and not _containers:
+        return 0                                     # no web view was ever made
+    from PySide6.QtWebEngineCore import QWebEnginePage
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    states = QWebEnginePage.LifecycleState
+    changed = 0
+    for view in root.findChildren(QWebEngineView):
+        page = view.page()
+        if page is None:
+            continue
+        if is_suspended and not page.isVisible() and page.lifecycleState() != states.Discarded:
+            page.setLifecycleState(states.Discarded)
+            changed += 1
+        elif not is_suspended and page.lifecycleState() != states.Active:
+            page.setLifecycleState(states.Active)
+            changed += 1
+    return changed
+# --- END [1.5] ---

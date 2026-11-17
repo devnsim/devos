@@ -9,8 +9,12 @@
 # CONTRACT:
 #   - Requires: app.data.store.database.Database
 #   - Exposes: PageStore(database) (+ set_page_kind, page_state, save_page_state); Page, Folder; canvas_key(page_id);
-#              UNTITLED_TITLE; PAGE_KIND_CANVAS, PAGE_KIND_BROWSER, PAGE_KIND_ICONS
+#              UNTITLED_TITLE; PAGE_KIND_CANVAS, PAGE_KIND_BROWSER, PAGE_KIND_INFINITE_CANVAS, PAGE_KIND_ICONS,
+#              PAGE_KIND_NOUNS
 # NOTES:
+#   - [2026-11-17] Page kind PAGE_KIND_INFINITE_CANVAS (the "Canvas" page: module cards on an endless grid);
+#                  its layout ({"cards": [...]}) is also searched for module instances when a page is deleted.
+#                  PAGE_KIND_NOUNS names each kind in messages.
 #   - [2026-11-16] Pages have a kind ("canvas" = module canvas, "browser" = web browser) and a small JSON
 #                  state (browser address, zoom ...): migration v2. create_page() takes kind and state.
 #   - [2026-11-15] Created when pages became user data (pages built from one template, CanvasPage).
@@ -23,7 +27,8 @@
 # ==============================================================================
 # [DEFINITIONS]
 # - canvas key (str): "page:<page_id>"; the ModuleCanvas layout key of a page (canvas_layouts table).
-# - page kind (str): What a page shows: PAGE_KIND_CANVAS (modules) or PAGE_KIND_BROWSER (a web browser).
+# - page kind (str): What a page shows: PAGE_KIND_CANVAS (tiled modules), PAGE_KIND_BROWSER (a web browser) or
+#   PAGE_KIND_INFINITE_CANVAS (module cards on an endless grid - shown to the user as a "Canvas" page).
 # - page state (dict): Small per-page settings kept with the page (state_json), e.g. the browser's address.
 # - favorite_order (int | None): Position in the Favorites list; None = not a favourite.
 # - folder_id (int | None): Containing folder; None = top level of "All Pages".
@@ -83,7 +88,9 @@ MIGRATIONS = [
 ]
 PAGE_KIND_CANVAS = "canvas"
 PAGE_KIND_BROWSER = "browser"
-PAGE_KIND_ICONS = {PAGE_KIND_CANVAS: "page.svg", PAGE_KIND_BROWSER: "globe.svg"}
+PAGE_KIND_INFINITE_CANVAS = "infinite_canvas"
+PAGE_KIND_ICONS = {PAGE_KIND_CANVAS: "page.svg", PAGE_KIND_BROWSER: "globe.svg", PAGE_KIND_INFINITE_CANVAS: "canvas.svg"}
+PAGE_KIND_NOUNS = {PAGE_KIND_CANVAS: "page", PAGE_KIND_BROWSER: "browser", PAGE_KIND_INFINITE_CANVAS: "canvas"}
 PAGE_COLUMNS = "page_id, title, folder_id, sort_order, favorite_order, kind"
 
 
@@ -92,9 +99,11 @@ def canvas_key(page_id: int) -> str:
 
 
 def _instance_ids(layout: dict | None) -> list[str]:
-    """Every module instance id in a canvas layout tree."""
+    """Every module instance id in a page layout (tile tree, or an infinite canvas's cards)."""
     if not layout:
         return []
+    if "cards" in layout:
+        return [card["instance_id"] for card in layout["cards"] if card.get("instance_id")]
     if "children" in layout:
         return [instance_id for child in layout["children"] for instance_id in _instance_ids(child)]
     return [layout["instance_id"]] if layout.get("instance_id") else []
@@ -184,7 +193,8 @@ class PageStore:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (title, folder_id, self._next_sort_order(folder_id), now, now, kind, json.dumps(state or {})),
         )
-        self.log.success("pages", f"Created {'browser ' if kind == PAGE_KIND_BROWSER else ''}page “{title}”")
+        noun = "page" if kind == PAGE_KIND_CANVAS else f"{PAGE_KIND_NOUNS.get(kind, kind)} page"
+        self.log.success("pages", f"Created {noun} “{title}”")
         return cursor.lastrowid
 
     def set_page_kind(self, page_id: int, kind: str) -> None:

@@ -7,18 +7,30 @@
 #      on that side, to any depth. Every seam between panes can be dragged.
 #   3. Moves tabs between panes on drag and drop, and tidies the layout when panes close.
 #   4. Tells the main window which page is showing in the active pane (sidebar highlight, title).
+#   5. Page lifecycle: a page whose tab closes is parked and suspended (its web views are discarded - no
+#      sound, no scripts); it wakes when it gets a tab again. Moving a page between panes or windows
+#      never suspends it.
+#   6. Several windows: a tab dropped here from another DevOS window moves over; "Open in new window" and
+#      tabs dropped outside every window are passed on (page_to_new_window).
 # CONTRACT:
 #   - Requires: app.ui.widgets.tab_group (TabGroup, NO_PAGE_INDEX, DROP_ZONE_TABS),
 #               app.ui.widgets.tiling_layout (drop zones, insert_beside, normalize_tree, first_leaf, new_splitter),
-#               app.ui.window_events.mouse_hub,
+#               app.ui.window_events.mouse_hub, app.ui.web_support.set_web_views_suspended, app.data.activity_log,
 #               QSS selectors #tab_area_panel, #pane_splitter in app/ui/theme.py
-#   - Exposes: TabArea(page_provider) (QWidget) with signals current_page_changed(int),
-#              create_page_requested(object TabGroup), rename_requested(int); open_page(page_index);
+#   - Exposes: TabArea(page_provider, parent=None, parked_pages_panel=None) (QWidget) with signals
+#              current_page_changed(int), create_page_requested(object TabGroup), rename_requested(int),
+#              page_to_new_window(int, bool at_cursor); open_page(page_index); release_page(page_index);
+#              park_all(); page_indices();
 #              open_page_in(tab_group, page_index); set_page_title(); set_page_icon(); replace_page_widget();
 #              forget_page(); PageProvider;
 #              close_page(page_index); close_current_tab(); split_pane(tab_group, drop_zone);
 #              close_pane(tab_group); add_leading_widget(widget); add_trailing_widget(widget); NO_PAGE_INDEX
 # NOTES:
+#   - [2026-11-17] Closed pages are suspended (web views discarded) a moment after they are parked, unless they
+#                  got a tab again meanwhile (moves between panes / windows don't reload anything). Closing
+#                  every tab used to leave web pages running (music kept playing). parked_pages_panel can be
+#                  shared by every window (a window that closes parks its pages there). release_page() and
+#                  drops from other windows' tab areas; page_to_new_window for the tab menu / drag-out.
 #   - [2026-11-16] Active pane follows mouse presses via window_events.mouse_hub() instead of an event
 #                  filter on the QApplication (PySide crashed on Qt WebEngine's internal objects).
 #   - [2026-11-16] Ctrl+T = new page in the active pane (the tab row's +); set_page_icon() and
@@ -50,7 +62,9 @@
 # - page provider: Object answering page_title(id), page_icon(id), page_widget(id) (see PageProvider).
 # - page_index (int): A page's id (user pages: database id; system pages: small reserved numbers).
 # - pane: One TabGroup (a leaf of the layout tree).
-# - parked_pages_panel (QWidget): Hidden holder for pages that have no tab, so they are never deleted.
+# - parked_pages_panel (QWidget): Hidden holder for pages that have no tab, so they are never deleted
+#   (given by the owner when several windows share pages, else this tab area's own).
+# - suspended page: A parked page whose web views are discarded; it wakes (reloads) when it gets a tab.
 # - root_splitter (QSplitter): Top of the layout tree; never removed.
 # ==============================================================================
 
@@ -102,12 +116,16 @@ Rules:
 # ==============================================================================
 # [2.1] imports
 # ==============================================================================
+import weakref
 from typing import Protocol
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+from shiboken6 import isValid
 
+from app.data.activity_log import get_activity_log
+from app.ui.web_support import set_web_views_suspended
 from app.ui.widgets.tab_group import DROP_ZONE_TABS, NO_PAGE_INDEX, TabGroup
 from app.ui.window_events import mouse_hub
 from app.ui.widgets.tiling_layout import (
@@ -118,6 +136,14 @@ from app.ui.widgets.tiling_layout import (
 # ==============================================================================
 # [3.1] class_signals_and_constants
 # ==============================================================================
+def _suspend_if_parked(panel: QWidget, page_widget: QWidget, title: str) -> None:
+    """Stop a closed page's web content - unless it got a tab again since it was parked."""
+    if not isValid(page_widget) or not isValid(panel) or page_widget.parentWidget() is not panel:
+        return
+    if set_web_views_suspended(page_widget, True):
+        get_activity_log().info("pages", f"Closed “{title}”: its web content is stopped until it is opened again")
+
+
 class PageProvider(Protocol):
     def page_title(self, page_index: int) -> str: ...
     def page_icon(self, page_index: int) -> str: ...
@@ -128,6 +154,9 @@ class TabArea(QWidget):
     current_page_changed = Signal(int)   # page_index shown in the active pane, or NO_PAGE_INDEX
     create_page_requested = Signal(object)   # TabGroup whose "Create New Page" was clicked
     rename_requested = Signal(int)           # page_index (tab context menu)
+    page_to_new_window = Signal(int, bool)   # page_index, at the mouse (dragged out) / beside this window
+
+    _instances: "weakref.WeakSet[TabArea]" = weakref.WeakSet()   # every tab area (all windows)
 
     NO_PAGE_INDEX = NO_PAGE_INDEX
     SEAM_WIDTH_PX = 4
@@ -138,9 +167,11 @@ class TabArea(QWidget):
 # ==============================================================================
 # [3.2] init_tab_area
 # ==============================================================================
-    def __init__(self, page_provider: PageProvider, parent: QWidget | None = None) -> None:
+    def __init__(self, page_provider: PageProvider, parent: QWidget | None = None,
+                 parked_pages_panel: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("tab_area_panel")
+        TabArea._instances.add(self)
         self.page_provider = page_provider
         self.tab_groups: list[TabGroup] = []
         self.active_tab_group: TabGroup | None = None
@@ -148,8 +179,8 @@ class TabArea(QWidget):
         self.trailing_widgets: list[QWidget] = []
         self._is_dragging_tab = False
 
-        # --- Pages without a tab wait here (hidden), so closing a pane never deletes them ---
-        self.parked_pages_panel = QWidget(self)
+        # --- Pages without a tab wait here (hidden, suspended), so closing a pane never deletes them ---
+        self.parked_pages_panel = parked_pages_panel if parked_pages_panel is not None else QWidget(self)
         self.parked_pages_panel.hide()
 
         # --- Layout tree: starts as one splitter holding one pane ---
@@ -198,12 +229,32 @@ class TabArea(QWidget):
         self._add_page_to(self.active_tab_group, page_index, insert_index=-1)
 
     def close_page(self, page_index: int) -> None:
-        """Close a page's tab; the page is parked, not destroyed."""
+        """Close a page's tab; the page is parked (and suspended), not destroyed."""
         owner_tab_group = self._find_owner(page_index)
         if owner_tab_group is None:
             return
-        self._park(owner_tab_group.remove_page(page_index))
+        self._park(page_index, owner_tab_group.remove_page(page_index))
         self._schedule_prune()
+
+    def release_page(self, page_index: int) -> QWidget | None:
+        """Take a page's tab out without parking it: the page is about to get a tab elsewhere (another
+        window), so it keeps running. Returns its widget."""
+        owner_tab_group = self._find_owner(page_index)
+        if owner_tab_group is None:
+            return None
+        page_widget = owner_tab_group.remove_page(page_index)
+        self._schedule_prune()
+        return page_widget
+
+    def park_all(self) -> None:
+        """Close every tab (the window is closing): all its pages are parked and suspended."""
+        for tab_group in list(self.tab_groups):
+            for page_index in tab_group.page_indices():
+                self._park(page_index, tab_group.remove_page(page_index))
+
+    def page_indices(self) -> list[int]:
+        """Every page with a tab here, pane by pane."""
+        return [page_index for tab_group in self.tab_groups for page_index in tab_group.page_indices()]
 
     def open_page_in(self, tab_group: TabGroup, page_index: int) -> None:
         """Open a page in a specific pane (moving its tab there if it is open elsewhere)."""
@@ -256,6 +307,8 @@ class TabArea(QWidget):
     ) -> None:
         """A tab was dropped on target_tab_group: move it in, or split the pane at that edge."""
         source_tab_group = self._find_owner(page_index)
+        if source_tab_group is None:
+            self._take_from_other_window(page_index)
 
         if drop_zone in EDGE_DROP_ZONES:
             if source_tab_group is target_tab_group and target_tab_group.tab_count() <= 1:
@@ -296,7 +349,7 @@ class TabArea(QWidget):
         if len(self.tab_groups) <= 1:
             return
         for page_index in tab_group.page_indices():
-            self._park(tab_group.remove_page(page_index))
+            self._park(page_index, tab_group.remove_page(page_index))
         self._remove_tab_group(tab_group)
 
     def _remove_tab_group(self, tab_group: TabGroup) -> None:
@@ -335,6 +388,10 @@ class TabArea(QWidget):
         tab_group.drag_finished.connect(self._on_drag_finished)
         tab_group.create_page_requested.connect(lambda: self.create_page_requested.emit(tab_group))
         tab_group.rename_requested.connect(self.rename_requested)
+        tab_group.new_window_requested.connect(
+            # next turn: a drag-out arrives from inside the tab row's own drag loop
+            lambda page_index, at_cursor: QTimer.singleShot(0, lambda: self.page_to_new_window.emit(page_index, at_cursor))
+        )
         self.tab_groups.append(tab_group)
         return tab_group
 
@@ -429,13 +486,30 @@ class TabArea(QWidget):
     def _add_page_to(self, tab_group: TabGroup, page_index: int, insert_index: int) -> None:
         provider = self.page_provider
         tab_group.setProperty("was_used", True)
+        page_widget = provider.page_widget(page_index)
         tab_group.add_page(page_index, provider.page_title(page_index), provider.page_icon(page_index),
-                           provider.page_widget(page_index), insert_index)
+                           page_widget, insert_index)
+        if set_web_views_suspended(page_widget, False):
+            get_activity_log().debug("pages", f"Woke “{provider.page_title(page_index)}” (its web content reloads)")
         self._set_active_tab_group(tab_group)
 
-    def _park(self, page_widget: QWidget | None) -> None:
-        if page_widget is not None:
-            page_widget.setParent(self.parked_pages_panel)
+    def _park(self, page_index: int, page_widget: QWidget | None) -> None:
+        if page_widget is None:
+            return
+        panel, title = self.parked_pages_panel, self.page_provider.page_title(page_index)
+        page_widget.setParent(panel)
+        # Next turn, and only if it is still parked: a page moving to another pane or window passes through
+        # here without stopping. (Uses nothing of this tab area: its window may be closing.)
+        QTimer.singleShot(0, lambda: _suspend_if_parked(panel, page_widget, title))
+
+    def _take_from_other_window(self, page_index: int) -> None:
+        """A tab dragged in from another window: remove it there (the page itself moves here)."""
+        for tab_area in list(TabArea._instances):
+            if tab_area is self or not isValid(tab_area):
+                continue
+            if tab_area._find_owner(page_index) is not None:
+                tab_area.release_page(page_index)
+                return
 
     def _find_owner(self, page_index: int) -> TabGroup | None:
         for tab_group in self.tab_groups:
