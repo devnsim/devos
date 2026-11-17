@@ -6,7 +6,12 @@
 
 #------------------------------------
 
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> {
+    # n8n is source-available (Sustainable Use License), which nixpkgs counts as unfree: allow that one package only
+    config.allowUnfreePredicate = pkg: (pkg.pname or (builtins.parseDrvName pkg.name).name) == "n8n";
+  }
+, withN8n ? true   # nix-shell --arg withN8n false skips n8n (large) when you don't use the n8n web app
+}:
 
 let
   python = pkgs.python3.withPackages (ps: with ps; [
@@ -32,12 +37,16 @@ pkgs.mkShell {
     python
     pkgs.cmake
     pkgs.gcc
+    pkgs.eigen       # core/physics: linear algebra (Eigen3)
+    pkgs.mujoco      # core/physics: articulated-body solver (MuJoCo C API); Jolt is fetched by CMake (pinned SHA256)
     pkgs.gdb
     pkgs.qt6.qtbase
     pkgs.qt6.qtwayland   # native Wayland support (KDE/Plasma)
     pkgs.qt6.qtsvg
     pkgs.git
     pkgs.gh
+  ] ++ pkgs.lib.optionals withN8n [
+    pkgs.n8n         # workflows: the Web App's "n8n" preset starts this one (same version for everyone, no npm -g)
   ];
 
   shellHook = ''
