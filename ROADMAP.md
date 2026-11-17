@@ -1,6 +1,6 @@
 # DevOS Roadmap
 
-Last updated: **2026-11-17** (Phase 5a–5b done: the Data engine and its views; 5c templates next — see Now)
+Last updated: **2026-11-17** (Phase 5 done, v0.3.0: Data engine, views, templates; Phase 6 Spatial is next — see Now)
 
 The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog records what changed, and this file records where DevOS stands and what comes next. The design behind it (engines, data shapes, protocol, contracts) is in [docs/architecture/engine-plan.md](docs/architecture/engine-plan.md); what is stored where is in [docs/architecture/data-ownership.md](docs/architecture/data-ownership.md).
 
@@ -13,49 +13,24 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
 
 ## Current state
 
-- **Version:** v0.2.0 (Phases 0–4 of the engine plan; see CHANGELOG).
+- **Version:** v0.3.0 (Phases 0–5 of the engine plan; see CHANGELOG).
 - **What DevOS is today:**
   - **Shell:** pages and folders, tabs, several windows, Canvas pages, Settings.
-  - **Modules:** 18 modules on the module / block canvases.
+  - **Tiles:** 7 built-in templates (Projects, Agents, Events, Database, Spreadsheet, Graph database, Dataset chart) and 12 modules on the module / block canvases; your own templates (Save as template…).
   - **Physics:** the standalone C++ engine (`core/physics/`).
-  - **Phase 0–4 work:**
+  - **Phase 0–5 work:**
     - backups and the migration fixture;
     - the engine kernel (bus, in-process host, UI bridge);
     - data shapes and Query v1;
     - the Knowledge engine, sole owner of the Library (core engine; `library()` client; Notes and Library are views over it, with Document and Links views);
     - the Data engine (5a): records, user databases, CSV datasets, sheets and graphs behind one source contract;
     - views over it (5b): Grid, Chart, Network, and Data's Sheet, SQL / Cypher consoles and Structure;
+    - templates (5c) in place of the Data-group modules, and Save as template;
     - the view runtime (ViewHost, page-wide channels, shared subscriptions, view builder, Data view tiles);
     - docking: engine packages, attach / detach with placeholders, conformance kit, Settings → Engines, bus inspector.
-- **Engine plan:** Phases 0–4 done, Phase 5a–5b done. Projects and Agents run on the view runtime over the Data engine; Notes and Library over Knowledge. The other modules still run as modules; they move into engines phase by phase.
+- **Engine plan:** Phases 0–5 done. Projects, Agents, Events, Database, Spreadsheet, Graph database and Dataset chart are templates over the Data engine; Notes and Library are views over Knowledge. The other modules still run as modules; they move into engines phase by phase.
 
 ## Now
-
-### Phase 5 — Data engine and templates (XL)
-- **5a Engine.** One interface for record collections, user SQLite databases, workbooks, Kùzu graphs and CSV datasets. Query v1 runs per source (SQL, Cypher, in memory). Spreadsheet formulas become computed fields. Writes are validated, and changes are announced with diffs.
-- **5b Views.** Generic: editable grid, chart, network. Specialist: sheet, SQL / Cypher consoles, structure.
-- **5c Templates and migration.** Projects, Agents (definitions), Events, Database, Spreadsheet, Graph DB. "Save as template". The picker shows Templates and "New view of an engine". Old module tiles become template instances, and records are copied into the Data store.
-- **Done when** the old Data-group modules, `RecordsModule` and the Phase 2 adapter are deleted, and the fixture's pages open with the same data and layouts.
-
-**5a done (2026-11-17).** What was built:
-- **Data engine** (`engines/data/`, replaces the Phase 2 records engine, same tables): one source contract for record collections, user SQLite databases (`db:<item>/<table>`), CSV datasets (`csv:<item>`), workbook sheets (`sheet:<item>/<sheet>`) and Kùzu node tables (`graph:<item>/<table>`); `collections` lists every table in the Library; `graph` gives a database as a Graph shape.
-- **Query v1 per source:** SQL (`engines/toolkit/sql.py`; records through `json_extract` with expression indexes - the decision: JSON values with indexes), Cypher for Kùzu, in memory for CSV / sheets and questions about formulas. A test compares the SQL answers with the memory toolkit on 18 questions.
-- **Computed fields:** formula properties on records (`=[Price] * [Quantity]`); sheet columns of formulas are computed and read-only.
-- **Checked writes, announced with diffs:** values checked by kind; formula cells, node keys and views refused with the reason; `.xlsx` edited in place (formatting kept); `changed` events carry `op` and `{id: {field: [old, new]}}`.
-- **Kernel:** `Engine.ask()` + `EngineManifest.uses` (Data asks Knowledge for files; the kit checks engine.json). Grouped questions sort by their aggregates.
-- Shared logic moved to `engines/toolkit/` (formulas, workbook, kuzu_db); saved views of the records engine upgrade on load (`ENGINE_RENAMES`).
-- Tests: `tests/test_data_engine.py`; the kit passes 9 of 9; the fixture opens unchanged.
-
-**5b done (2026-11-17).** What was built:
-- **Engine.watch** (the 5b open question, answered: engines watch the engines they declare in `uses`; events are handled on the engine's own thread, in order with requests). Knowledge's `refresh_size` announces in-place changes with `by`; Data watches `knowledge.changed` and refreshes views of files other tools changed (op "external"), skipping its own writes. The Graph Database module reports its writes.
-- **Generic views:** `grid` (paged by the engine, 200 rows; edit in place; copy / paste blocks; + Column with formulas; computed columns read-only), `chart` (line / bar / scatter, dates and categories on X, Totals by X grouped in the engine), `network` (a graph table's graph on the shared `GraphCanvas`, also used by Links).
-- **Data's own views** (`engines/data/views.py`): Sheet (cells, formula bar), SQL console, Cypher console (history, results, what changed), Structure (columns, keys, indexes, foreign keys, relationships; + Column / Remove). Requests `structure`, `cells`, `set_cell`, `sql`, `cypher`.
-- **View API:** `ViewType.accepts(source)` (the builder offers only views the data fits), `MappingSlot.auto`, `host.add_property(formula=…)`.
-- Tests: `tests/test_data_views.py` (8), watch tests in `tests/test_data_engine.py`; 125 pass; Data kit 9 of 9.
-
-**Start here (5c).** Templates: a template = engines + schema + view definitions + block layout + toolbars (the plan's Template contract). Start with the built-ins (Projects, Agents definitions, Events, Database, Spreadsheet, Graph DB) as data, a "Save as template" on any SourceModule page, and the picker showing Templates and "New view of an engine". Then migration: old module tiles (Database Editor, Spreadsheet, Graph Database, Calendar, Graph, Projects, Agents) open as template instances with their settings carried over, and the fixture's pages must open with the same data and layouts. Done when those modules, `RecordsModule` and the `records_adapter_defaults` table (copied into template schemas, kept one version) are gone.
-
-## Next
 
 ### Phase 6 — Spatial engine (XL) · first after Data
 Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geometry), GeoPandas and pyogrio (tables with geometry), rasterio (rasters) and PDAL (lidar). Layers are stored as **GeoPackage** in the Library (one SQLite file that QGIS opens natively). `shell.nix` pins these and QGIS (with a `withQgis` switch, like n8n). QGIS is used as an outside program (`qgis`, `qgis_process`) and through its file formats, which keeps its GPL licence separate from DevOS. Importing PyQGIS into DevOS would only happen out of process (13a), if ever.
@@ -89,9 +64,10 @@ Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geomet
   - Rasters: elevation, imagery.
   - Lidar (LAS / LAZ through PDAL) as georeferenced point clouds.
 
-## Later
+**Start here (6a).** First the Spatial engine package (`engines/spatial/`, uses Knowledge for GeoPackages in the Library) with GDAL / PROJ / GEOS / pyogrio pinned in `shell.nix`, the Geo shape's toolkit (reproject, bbox, simplify), and vector import into GeoPackage layers answering the source contract (a layer is a Table with a geometry field, so Grid / Chart / Structure work at once). Then the MapLibre map view (answer the open question first) and the Map / Places templates (the Map module's places copied into a layer).
 
-**Order:** phases 0–5 go in order. After that, 6–11 can go in any order: Spatial is first by priority, and Displays can start any time after Phase 3. Moving physics into its own process (13a) can start any time after Phase 3. Sizes are relative: S is a session or two, M a handful, L a dozen or so, XL is split into sub-phases. Each phase ends with a minor version tag.
+
+## Next
 
 ### Phase 7 — Displays (L) · any time after Phase 3
 - **Pop-out views:** any view leaves its page as its own window on another monitor and stays linked to its page.
@@ -101,6 +77,10 @@ Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geomet
 - Per-view redraw rates and shared subscriptions (from Phase 2) keep ten monitors from multiplying the load. A GPU-side renderer for very large point clouds comes when it's needed.
 - Later: the same view definitions rendered in a browser on another machine or a tablet.
 - **Done when** a three-monitor profile restores (a map on one, a table and chart on another, a bare wall on the third), selection stays linked across them, and unplugging a monitor degrades gracefully.
+
+## Later
+
+**Order:** phases 0–5 go in order. After that, 6–11 can go in any order: Spatial is first by priority, and Displays can start any time after Phase 3. Moving physics into its own process (13a) can start any time after Phase 3. Sizes are relative: S is a session or two, M a handful, L a dozen or so, XL is split into sub-phases. Each phase ends with a minor version tag.
 
 ### Phase 8 — Simulation engine, with Geometry (XL)
 - Wraps `core/physics`: load, step, seek, branch and controls; worldline as Series / Tensor streams; contact events.
@@ -144,6 +124,36 @@ Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geomet
 - **Done when** a physics run on a cluster node passes the same bit-exact `--verify` as a local run.
 
 ## Done
+
+### Phase 5 — Data engine and templates (XL) · done 2026-11-17
+- **5a Engine.** One interface for record collections, user SQLite databases, workbooks, Kùzu graphs and CSV datasets. Query v1 runs per source (SQL, Cypher, in memory). Spreadsheet formulas become computed fields. Writes are validated, and changes are announced with diffs.
+- **5b Views.** Generic: editable grid, chart, network. Specialist: sheet, SQL / Cypher consoles, structure.
+- **5c Templates and migration.** Projects, Agents (definitions), Events, Database, Spreadsheet, Graph DB. "Save as template". The picker shows Templates and "New view of an engine". Old module tiles become template instances, and records are copied into the Data store.
+- **Done when** the old Data-group modules, `RecordsModule` and the Phase 2 adapter are deleted, and the fixture's pages open with the same data and layouts.
+
+**5a done (2026-11-17).** What was built:
+- **Data engine** (`engines/data/`, replaces the Phase 2 records engine, same tables): one source contract for record collections, user SQLite databases (`db:<item>/<table>`), CSV datasets (`csv:<item>`), workbook sheets (`sheet:<item>/<sheet>`) and Kùzu node tables (`graph:<item>/<table>`); `collections` lists every table in the Library; `graph` gives a database as a Graph shape.
+- **Query v1 per source:** SQL (`engines/toolkit/sql.py`; records through `json_extract` with expression indexes - the decision: JSON values with indexes), Cypher for Kùzu, in memory for CSV / sheets and questions about formulas. A test compares the SQL answers with the memory toolkit on 18 questions.
+- **Computed fields:** formula properties on records (`=[Price] * [Quantity]`); sheet columns of formulas are computed and read-only.
+- **Checked writes, announced with diffs:** values checked by kind; formula cells, node keys and views refused with the reason; `.xlsx` edited in place (formatting kept); `changed` events carry `op` and `{id: {field: [old, new]}}`.
+- **Kernel:** `Engine.ask()` + `EngineManifest.uses` (Data asks Knowledge for files; the kit checks engine.json). Grouped questions sort by their aggregates.
+- Shared logic moved to `engines/toolkit/` (formulas, workbook, kuzu_db); saved views of the records engine upgrade on load (`ENGINE_RENAMES`).
+- Tests: `tests/test_data_engine.py`; the kit passes 9 of 9; the fixture opens unchanged.
+
+**5b done (2026-11-17).** What was built:
+- **Engine.watch** (the 5b open question, answered: engines watch the engines they declare in `uses`; events are handled on the engine's own thread, in order with requests). Knowledge's `refresh_size` announces in-place changes with `by`; Data watches `knowledge.changed` and refreshes views of files other tools changed (op "external"), skipping its own writes. The Graph Database module reports its writes.
+- **Generic views:** `grid` (paged by the engine, 200 rows; edit in place; copy / paste blocks; + Column with formulas; computed columns read-only), `chart` (line / bar / scatter, dates and categories on X, Totals by X grouped in the engine), `network` (a graph table's graph on the shared `GraphCanvas`, also used by Links).
+- **Data's own views** (`engines/data/views.py`): Sheet (cells, formula bar), SQL console, Cypher console (history, results, what changed), Structure (columns, keys, indexes, foreign keys, relationships; + Column / Remove). Requests `structure`, `cells`, `set_cell`, `sql`, `cypher`.
+- **View API:** `ViewType.accepts(source)` (the builder offers only views the data fits), `MappingSlot.auto`, `host.add_property(formula=…)`.
+- Tests: `tests/test_data_views.py` (8), watch tests in `tests/test_data_engine.py`; 125 pass; Data kit 9 of 9.
+
+**5c done (2026-11-17).** What was built:
+- **Templates** (`app/templates/`): `TemplateSpec` (source kind, schema, views and their settings, layout, actions, extension); built-ins Projects, Agents, Events, Database, Spreadsheet, Graph database, Dataset chart under the ids of the modules they replace; `TemplateModule` (file and table pickers; New… / Import… / Export… / + Table / + Sheet / Sample graph / Sample data…); the Agents chat as `AgentsExtension`.
+- **Migration:** old tiles open as templates with the same file and table (`database_id` + `table`, `item_id`, the Graph's `dataset_id` and columns), their block layouts translated (`legacy_blocks`) and SQL / Cypher history kept. Collection schemas moved onto `record_collections` (`noun`, `defaults_json`), copied from `records_adapter_defaults` (kept one version, no longer written).
+- **Save as template…** (decision: in the workspace database, `templates_user`); the picker lists templates, then modules, then "New view of an engine…".
+- Removed: the Projects, Agents, Calendar, Database Editor, Spreadsheet, Graph Database and Graph modules, `RecordsModule`. Gone with them: the Database Editor's explorer and properties panels, the Spreadsheet's selection statistics, the Graph tool's appearance settings.
+- Tests: `tests/test_templates.py` (8); 130 pass; the fixture opens with the same pages, tiles, records, chats, files and database rows.
+- **Done when** the old Data-group modules, `RecordsModule` and the Phase 2 adapter are deleted, and the fixture's pages open with the same data and layouts. ✔
 
 ### Phase 4 — Knowledge engine (M) · done 2026-11-17
 What was built:
@@ -270,7 +280,6 @@ Ideas raised but not yet placed in a phase:
 
 ## Open questions
 
-- **Phase 5c:** do user templates live in the workspace database as rows (recommended, like pages), or as files in the Library so they back up and move with it?
 - **Phase 6:** MapLibre GL for the interactive map (recommended), or keep Leaflet? For print layouts, render them in the engine, or hand them to QGIS (`qgis_process` with a layout)?
 - **Phase 7:** are all monitors on one machine, or can some belong to other machines from the start?
 - **Phase 12:** Python-only user views, or also a sandboxed option?

@@ -22,6 +22,7 @@
 #   - Exposes: command-line tool; check_file(path, text) -> (errors, warnings) and boundary_errors(relative, lines)
 #              for reuse in tests.
 # NOTES:
+#   - [2026-11-17] Unused-style check also reads engine-bundled views (engines/<p>/views.py), which use the theme.
 #   - [2026-11-17] app/ never imports an engine package's internals (Phase 4: only Knowledge touches the Library).
 #   - [2026-11-17] Engines never import each other; an engine package's views (views.py / views/) may use Qt.
 #   - [2026-11-17] Warns when files changed but ROADMAP.md didn't (the roadmap is updated every session).
@@ -189,7 +190,9 @@ def boundary_errors(relative: str, lines: list[str]) -> list[str]:
 def unused_theme_selectors() -> list[str]:
     theme = (ROOT / "app/ui/theme.py").read_text()
     qss = theme[theme.find('BASE_QSS = f"""'):]
-    code = "\n".join(path.read_text() for path in (ROOT / "app").rglob("*.py") if path.name != "theme.py")
+    sources = [path for path in (ROOT / "app").rglob("*.py") if path.name != "theme.py"] + \
+        [path for path in (ROOT / "engines").rglob("*.py") if _is_engine_views(str(path.relative_to(ROOT)))]
+    code = "\n".join(path.read_text() for path in sources)         # engine-bundled views use the theme too
     selectors = sorted(set(re.findall(r"#([a-z][a-z0-9_]+)", qss)))
     selectors = [name for name in selectors if not re.fullmatch(r"[0-9a-f]{3}|[0-9a-f]{6}", name)]   # hex colours
     return [name for name in selectors if not re.search(r"['\"]%s['\"]" % name, code)]

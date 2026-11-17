@@ -14,9 +14,11 @@
 #   - Requires: app.data.store.database (Database, get_database). No Qt.
 #   - Exposes: PROPERTY_KINDS, PropertySpec, Record, RecordCollection, get_collection(name, defaults),
 #              coerce_value(spec, value), display_text(spec, value), TITLE_KEY
-#   - Tables (namespace "records"): record_collections, record_items. Values are JSON per record, so a
+#   - Tables (namespace "records"): record_collections (properties_json = the user's properties; noun and
+#     defaults_json = the template's schema, since Phase 5c), record_items. Values are JSON per record, so a
 #     new property never needs a schema migration.
 # NOTES:
+#   - [2026-11-17] Phase 5c (records v2): record_collections.noun / defaults_json hold a collection's schema (from its template).
 #   - [2026-11-17] Phase 5a: "formula" property kind (PropertySpec.formula; values computed, never stored).
 #   - [2026-11-16] Created to explore the "everything is a database" model with the Agents and Projects
 #                  modules. Deliberately self-contained (two tables, JSON values): pages and other modules
@@ -74,6 +76,10 @@ MIGRATIONS = [
         updated_at  REAL NOT NULL
     );
     CREATE INDEX record_items_collection ON record_items (collection, position);
+    """,
+    """
+    ALTER TABLE record_collections ADD COLUMN noun TEXT NOT NULL DEFAULT 'record';
+    ALTER TABLE record_collections ADD COLUMN defaults_json TEXT NOT NULL DEFAULT '[]'
     """,
 ]
 PROPERTY_KINDS = ("text", "long_text", "number", "select", "multi_select", "date", "checkbox", "url", "formula")

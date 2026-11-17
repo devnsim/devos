@@ -10,9 +10,10 @@
 #   4. Part Design: steps shown as a top progress bar; a locked step says why; done steps tick.
 # CONTRACT:
 #   - Requires: tests/conftest.py fixtures (qapp, database, pump, wait_for), app.modules.agents,
-#               app.modules.projects, app.modules.cad.workbench. No network: the fake server listens on 127.0.0.1.
+#               app.templates (Projects, Agents), app.modules.cad.workbench. No network: the fake server listens on 127.0.0.1.
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 5c: Projects and Agents are templates (create_module("projects", ...)); agent parts in agents/template.py.
 #   - [2026-11-17] Phase 2: records go through the records engine (module.focus, ViewHosts); waits for engine answers.
 #   - [2026-11-17] Created with the Agents chat, record form requests and the Part Design step bar.
 # ==============================================================================
@@ -160,7 +161,7 @@ def test_agent_values_become_a_chat_config():
 def test_agent_chat_view(qapp, database, pump, wait_for, fake_provider, monkeypatch):
     from PySide6.QtWidgets import QMessageBox, QPushButton
 
-    from app.modules.agents.view import OLLAMA_URL_PREFERENCE
+    from app.modules.agents.template import OLLAMA_URL_PREFERENCE
     from app.modules.registry import create_module
     database.set_preference(OLLAMA_URL_PREFERENCE, fake_provider)
     view, _context = create_module("agents", database)
@@ -220,8 +221,8 @@ def test_double_click_and_right_click_open_a_records_form(qapp, database, pump, 
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
 
-    from app.modules.projects.view import ProjectsModule
-    module = ProjectsModule()
+    from app.modules.registry import create_module
+    module, _context = create_module("projects", database)
     module.resize(1200, 700)
     module.show()
     pump()

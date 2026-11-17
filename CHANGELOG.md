@@ -4,7 +4,20 @@ All notable changes to DevOS. Versions follow [Semantic Versioning](https://semv
 Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-11-17
+Engine plan Phase 5: the Data engine, its views and templates.
+
 ### Added
+- Engine plan Phase 5c (templates):
+  - `app/templates/`: `TemplateSpec`, built-in templates Projects, Agents, Events, Database, Spreadsheet, Graph
+    database, Dataset chart (the ids of the modules they replace), `TemplateModule` (file / table pickers, old
+    settings and block layouts carried over, Save as template…), toolbar actions.
+  - `app/data/store/templates.py` (`templates_user`): your templates in the workspace database.
+  - Data requests `create_file`, `add_sheet`; `collections` takes `item_id`.
+  - `SourceModule.set_source()`, `RecordFocus.set_source()`; `module_specs()` / `module_spec()`; the picker lists
+    templates and "New view of an engine…".
+  - `engines/toolkit/series.py`: `mock_series()` (sample datasets). `tests/test_templates.py`.
 - Engine plan Phase 5b (views over Data):
   - View types `grid` (paged by the engine, editable, copy / paste, + Column), `chart` (line / bar / scatter,
     dates and categories, totals grouped in the engine) and `network` (a graph table's graph);
@@ -27,6 +40,10 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
   - `tests/test_data_engine.py` (SQL pushdown compared with the memory toolkit on 18 questions, every source).
 
 ### Changed
+- Collection schemas live on `record_collections` (`noun`, `defaults_json`; records migration v2), copied from
+  `records_adapter_defaults`, which is kept one version and no longer written.
+- A view host rebuilds a view that couldn't show its old source; a definition without a collection waits.
+- `check_standard.py` reads engine-bundled views for the unused-style check; styles of removed modules dropped.
 - Knowledge's `refresh_size` announces the change (`by` names who made it); the Graph Database module reports
   its writes. Optional mapping slots never reuse a field another slot took. A table view whose title column is
   also a field shows it once.
@@ -38,6 +55,9 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 - New rows are selected by the reply's `id` (file tables key rows by `_rowid`).
 
 ### Removed
+- Modules Projects, Agents (AgentsModule), Calendar, Database Editor, Spreadsheet, Graph Database, Graph and
+  `RecordsModule` (replaced by templates); `tests/test_db_editor.py`. The Database Editor's explorer and
+  properties panels, the Spreadsheet's selection statistics and the Graph tool's appearance settings went with them.
 - The Phase 2 records engine (`engines/records/`).
 
 ## [0.2.0] - 2026-11-17

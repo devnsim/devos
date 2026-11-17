@@ -23,6 +23,7 @@
 #              close_card(), bring_to_front(), zoom_to(), fit(), cells, cards, to_layout(), load_saved_layout(),
 #              save(); ModuleCard; GRID_PX
 # NOTES:
+#   - [2026-11-17] Phase 5c: cards offer templates too; the choices are read again for each new card.
 #   - [2026-11-17] Has a channel_hub (app.views.channels): views on this page share their selection.
 #   - [2026-11-17] Created (Canvas page kind). Cards are real widgets laid out over a painted grid, not a
 #                  QGraphicsScene: web views and OpenGL views don't render inside graphics proxies. Zoom
@@ -235,7 +236,7 @@ class InfiniteCanvas(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.database, self.page_key = database, page_key
-        self.choices = library_choices() if database is not None else []
+        self.choices = library_choices(None, database) if database is not None else []
         self.mime_type = TILE_MIME_PREFIX + uuid.uuid4().hex
         self.cards: list[ModuleCard] = []              # stacking order: back to front
         self.cells: dict[int, list[int]] = {}         # tile_id -> [x, y, w, h] in cells
@@ -321,6 +322,8 @@ class InfiniteCanvas(QWidget):
         taken = {(cells[0], cells[1]) for cells in self.cells.values()}
         while not exact and (x, y) in taken:
             x, y = x + 2, y + 2
+        if self.database is not None:
+            self.choices = library_choices(None, self.database)       # templates saved since the page opened
         card = ModuleCard(self._next_card_id, self.mime_type, self.choices)
         self._next_card_id += 1
         card.setParent(self)

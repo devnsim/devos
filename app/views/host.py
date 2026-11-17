@@ -19,6 +19,8 @@
 #               #view_message_label, #view_menu_btn
 #   - Exposes: ViewHost(definition, record_actions=None, parent=None) with signals state_changed, status(str, bool)
 # NOTES:
+#   - [2026-11-17] set_definition() builds the view again when there was none (a view that couldn't show the old source).
+#   - [2026-11-17] Phase 5c: a definition without a collection (a template tile choosing its file) waits instead of asking.
 #   - [2026-11-17] add_property(formula=...) for formula properties (Data engine).
 #   - [2026-11-17] Phase 5b: a view type that can't show this source (ViewType.accepts) says so instead of failing.
 #   - [2026-11-17] Phase 5a: a new row's id comes from the reply's "id" when there is one (file tables key rows by "_rowid").
@@ -161,6 +163,10 @@ class ViewHost(QWidget):
         queries = shared_queries()
         if self._key is not None:
             queries.unsubscribe(self, self._key)
+            self._key = None
+        if not self.source.get("collection"):            # a tile still choosing its file: nothing to ask yet
+            self._show_message("No data chosen yet.")
+            return
         self._key = queries.subscribe(self, self.source, self.definition["query"])
 
     def _changed(self) -> None:
@@ -175,7 +181,7 @@ class ViewHost(QWidget):
     def set_definition(self, definition: dict) -> None:
         """Replace the whole recipe (the view builder, a restored layout)."""
         old, self.definition = self.definition, upgrade_definition(definition, definition)
-        if old["view_type"] != self.definition["view_type"]:
+        if old["view_type"] != self.definition["view_type"] or self.view is None:   # or it couldn't show the old data
             self._build_view()
         self.filter_bar.set_filter(self.definition["query"].get("filter"), emit=False)
         self.filter_bar.setVisible(bool(self.definition["query"].get("filter")) or self.filter_bar.isVisible())

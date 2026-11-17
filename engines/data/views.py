@@ -16,6 +16,7 @@
 #   - Exposes: SheetView, ConsoleView, StructureView, register_views() (types "sheet", "sql_console",
 #              "cypher_console", "structure"; engine "data"), HISTORY_SIZE
 # NOTES:
+#   - [2026-11-17] Consoles and the formula bar use the monospace #sql_editor / #formula_edit styles.
 #   - [2026-11-17] Created in Phase 5b of the engine plan.
 # ==============================================================================
 
@@ -68,10 +69,11 @@ class SheetView(QWidget):
         self.editable = False
         self._filling = False
         layout, row = block_layout(self)
-        self.cell_label = QLabel("A1", objectName="control_label")
+        self.cell_label = QLabel("A1", objectName="cell_name_label")
         self.cell_label.setMinimumWidth(44)
         row.addWidget(self.cell_label)
-        self.formula_edit = QLineEdit(placeholderText="Value or =formula", toolTip="What the cell holds (Enter saves)")
+        self.formula_edit = QLineEdit(objectName="formula_edit", placeholderText="Value or =formula",
+                                      toolTip="What the cell holds (Enter saves)")
         self.formula_edit.returnPressed.connect(self._formula_entered)
         row.addWidget(self.formula_edit, 1)
         row.addWidget(host.view_menu_button())
@@ -175,7 +177,7 @@ class ConsoleView(QWidget):
         row.addWidget(host.view_menu_button())
         reserve_controls_space(row)
         splitter = QSplitter(Qt.Orientation.Vertical)
-        self.console_edit = QPlainTextEdit(objectName="note_editor")
+        self.console_edit = QPlainTextEdit(objectName="sql_editor")
         self.console_edit.setPlainText((host.presentation.get("history") or [self.first_statement()])[0])
         QShortcut(QKeySequence("Ctrl+Return"), self.console_edit, activated=self.run)
         splitter.addWidget(self.console_edit)

@@ -8,6 +8,11 @@ Purpose:
 
 # Updates
 
+- **[2026-11-17] Engine plan, Phase 5 done: templates (v0.3.0).**
+  - **Templates:** Projects, Agents, Events, Database, Spreadsheet, Graph database and Dataset chart are templates now: views over the Data engine, laid out and ready, with their own buttons (*New…*, *Import…*, *Export…*, *+ Table*, *+ Sheet*, *Sample graph*, *Sample data…*). File templates pick which database, workbook, dataset or graph they show, and which table.
+  - **Your pages are unchanged:** tiles of the old Database Editor, Spreadsheet, Graph Database, Graph, Calendar, Projects and Agents open as the matching template with the same file, table and console history. Their views replace the old blocks (the explorer, selection statistics and properties panels are gone; the table picker, Grid, Chart and SQL console do that work).
+  - **Save as template…** on any template tile keeps its views, their settings and layout as your own template, in every tile's picker (kept in your workspace database, like pages).
+  - The picker lists templates first, then the other modules, and *New view of an engine…* (any view of any data).
 - **[2026-11-17] Engine plan, Phase 5b: views for every table.**
   - **Grid:** any table as an editable grid, a page of 200 rows at a time (big databases stay quick). Paste a block of cells from a spreadsheet, copy cells out, add columns (formula columns too). Computed columns show greyed, with their formula on hover.
   - **Chart:** line, bar or scatter of one or two number columns against numbers, dates or categories; *Totals* sums, averages or counts by X inside the engine.
@@ -144,17 +149,15 @@ devos/
 │   │       ├── pages.py          # PageStore: the user's pages (canvas / browser), folders, favourites
 │   │       ├── records.py        # RecordCollection: records with declared properties (agents, projects …)
 │   │       ├── backup.py         # backups of the data folder: create, check, restore at start-up, prune
+│   │       ├── templates.py      # TemplateStore: your templates (Save as template…) in the workspace database
 │   │       └── secrets.py        # passwords / API keys in the system keyring (never in SQLite)
+│   ├── templates/                # TEMPLATES (Phase 5c): spec.py, builtin.py, module.py (TemplateModule), actions.py
 │   ├── modules/                  # MODULE APPS: each = view (UI) + engine (logic / C++) + store (SQLite)
 │   │   ├── registry.py           # MODULE_LIBRARY, ModuleSpec, ModuleContext, create_module()
 │   │   ├── base.py               # ModuleView: base class of every module view (settings, live loop, blocks)
 │   │   ├── source_module.py      # SourceModule: a module made of views over one engine source + RecordFocus
-│   │   ├── records_module.py     # RecordsModule: SourceModule on a record collection (Projects, Agents)
 │   │   ├── data_view/            # Data view module: any view of any source as a page tile / Canvas card
-│   │   ├── agents/               # record module + chat: engine.py (Claude / Gemini / Ollama), store.py (chats), blocks.py (Chat), view.py
-│   │   ├── projects/             # record module: view.py
-│   │   ├── spreadsheet/          # Spreadsheet: view.py (logic in engines/toolkit/workbook.py, formulas.py)
-│   │   ├── graph_db/             # Kùzu graph databases: view.py (logic in engines/toolkit/kuzu_db.py)
+│   │   ├── agents/               # the Agents template's parts: template.py (properties, AgentsExtension), engine.py (Claude / Gemini / Ollama), store.py (chats), blocks.py (Chat)
 │   │   ├── map/                  # Leaflet map: store.py (places), view.py
 │   │   ├── cad/                  # engine.py (parts), mesh_view.py (3D), workbench.py (Part Design window), view.py
 │   │   ├── comms/                # email: engine.py (IMAP / SMTP / keyring), view.py (+ text / calls placeholders)
@@ -162,13 +165,10 @@ devos/
 │   │   ├── web_app/              # Web App: a site in a tile with its own container: view.py
 │   │   ├── rf_imaging/           # RF imaging 2.5-6 GHz: sensor.py, imaging.py, blocks.py, view.py
 │   │   ├── wave_sim/             # RF wave simulator 1-10 GHz: physics.py, scene.py, engine.py, store.py, blocks.py, view.py
-│   │   ├── db_editor/            # Database Editor: engine.py (no Qt), view.py (toolbar + state), blocks.py, dialogs.py
-│   │   ├── graph/                # Graph tool: datasets.py (load / import / mock), view.py (plot + settings window)
 │   │   ├── notes/                # Notes: views of the Knowledge engine's notes (list, document, links): view.py
 │   │   ├── library/              # Library: views of every Library item + import / export: view.py
 │   │   ├── trading_chart/        # Financial Chart: market_data.py, indicators.py, backtest.py, chart_items.py, store.py, view.py
 │   │   ├── tensor_inspector/     # generic 4D tensor viewer (waterfall + scatter blocks): view.py
-│   │   └── calendar/             # month calendar: view.py
 │   └── ui/
 │       ├── theme.py              # all colors / QSS styling (palette, size tokens, *_QSS sections)
 │       ├── main_window.py        # MainWindow: sidebar + tab workspace + status bar; Workspace (shared by all windows)
@@ -286,7 +286,6 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `TabGroup` | Class (`QWidget`) | `app/ui/widgets/tab_group.py` | One pane: tab row + page area. × / middle-click close; drag inside the row to reorder, drag out to move the tab to another pane. Split (new pane to the right) and close-pane buttons on the right. |
 | module | Term | `app/modules/` | A small app a page hosts in a tile: `ModuleView` (UI) + engine + store; its views are blocks. |
 | block | Term | `app/ui/canvas/block_canvas.py` | One view inside a module (3D scene, waterfall, slice…); split / rearrange / resize / close / replace like modules on a page. |
-| `CalendarModule` | Class (`ModuleView`) | `app/modules/calendar/view.py` | Month calendar module: ‹ / Today / › navigation, click to select a day; signals `date_selected(QDate)`, `month_changed(int, int)`. |
 | `Tensor4D` | Class | `app/data/tensor4d.py` | 4D NumPy array with named axes (`t, x, y, z`): `take`, `volume`, `plane`, `line`, `value`, `window`, `reduce`, `waterfall`, `to_points`, `push` (streaming), `demo()`, `inspect()`. |
 | `TensorInspectorModule` | Class (`ModuleView`) | `app/modules/tensor_inspector/view.py` | Live inspector for a `Tensor4D` as blocks: waterfalls (time × one axis) and 3D scatters of one time step; `launch_inspector()` opens it in its own window. |
 | `RfInspectorModule` | Class (`ModuleView`) | `app/modules/rf_imaging/view.py` | RF imaging module: toolbar (live, calibrate, save/load, view mode, timeline) + blocks (3D scene, range-time, spectrum, slice, materials in `blocks.py`). |
@@ -327,8 +326,6 @@ Alphabetical. **Where** = the file or the class that owns it.
 | content kind | Concept (`str`) | `CONTENT_KINDS` (`app/data/content_kinds.py`) | `note`, `dataset`, `capture`, `cad`, `database`, `graph`, `sheet`, `geo`, `image`, `file`. |
 | preferences | Concept | `Database.get_preference()` / `set_preference()` | User-level settings (JSON) in `user_preferences`, e.g. `log_panel_open`. |
 | `SettingsDialog` | Class (`QDialog`) | `app/ui/settings_dialog.py` | Separate, non-modal settings window with tabs and Apply / OK / Close; signal `applied`. |
-| `GraphModule` | Class (`ModuleView`) | `app/modules/graph/view.py` | 2D graph tool; gear opens data (datasets, import CSV, mock) and appearance settings. |
-| `Dataset` / `make_mock()` | Class / function | `app/modules/graph/datasets.py` | Table of numbers from a library CSV / generated mock data (`MOCK_GENERATORS`). |
 | `NotesModule` | Class (`SourceModule`) | `app/modules/notes/view.py` | Views of the notes (list + document by default, links on request); + New note; remembers the selected note (`note_id`) and the editor mode. |
 | `LibraryModule` | Class (`SourceModule`) | `app/modules/library/view.py` | Views of every Library item (table + document by default; any view by *New view…*); Import… / Export…; rename and delete through the views. |
 | page kind | Concept (`str`) | `app/data/store/pages.py` | `"canvas"` (tiled modules, `CanvasPage`), `"browser"` (`BrowserPage`) or `"infinite_canvas"` (`InfiniteCanvasPage`, shown as "Canvas"); pages also keep a small JSON state (`page_state()`). |
@@ -343,9 +340,6 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `BrowserPage` | Class (`QWidget`) | `app/ui/pages/browser_page.py` | Web browser page: navigation, address / search bar, find, zoom; named after the site until renamed. |
 | `web_support` | Module | `app/ui/web_support.py` | `prepare_web_engine()` (before QApplication), `web_engine_unavailable_reason()`, `browser_profile()`, `address_to_url()`. |
 | `mouse_hub()` / `WindowMouseHub` | Function / class | `app/ui/window_events.py` | Mouse presses of watched windows: `pressed(QWidget)` signal, `add_press_handler()` / `remove_press_handler()`. Use instead of app-wide event filters. |
-| `DbEditorModule` | Class (`ModuleView`) | `app/modules/db_editor/view.py` | Database Editor: toolbar + shared state (connection, table, query, row) for its blocks. |
-| `UserDatabases` / `DbConnection` | Classes | `app/modules/db_editor/engine.py` | The user's SQLite databases (Library kind `database`, plus the read-only system database) / one open database: rows, schema, SQL, properties. |
-| row key | Concept (`dict`) | `db_editor/engine.py` | How an edit finds its row again: `{"rowid": n}`, or the primary-key columns for WITHOUT ROWID tables. |
 | `CHART_THEMES` | Constant (dict) | `app/modules/trading_chart/chart_items.py` | Up / down colour pairs for the Financial Chart. |
 | `BlockCanvas` / `BlockSpec` | Classes | `app/ui/canvas/block_canvas.py` | Module-level canvas of blocks; corner controls fade in on hover / focus; layout + block state saved in module settings. |
 | `ModuleView` | Class (`QWidget`) | `app/modules/base.py` | Base of every module view: `setting()` / `save_setting()`, `setup_live()` (pauses when hidden), `build_block_canvas()`. |
@@ -386,8 +380,14 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `RecordFocus` | Class | `app/modules/source_module.py` | The page's selected record of a source, fetched from the engine (Agents chat, Notes, exports). |
 | `DataViewModule` | Class (`ModuleView`) | `app/modules/data_view/view.py` | "Data view": any view of any source as a page tile or Canvas card. |
 | Query v1 | Contract | `engines/kernel/query.py` | The question a view asks: filter tree, search, sort, group + aggregates, paging, time range, extent. `run_query()` in `engines/toolkit/table.py` (memory), `compile_query()` in `engines/toolkit/sql.py` (SQLite). |
-| `RecordsModule` | Class (`SourceModule`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`, optional `NEW_RECORD_PRESETS`; hooks `extra_block_specs()`, `record_actions()`); `AgentsModule`, `ProjectsModule` use it. |
-| `agent_definition()` | Function | `app/modules/agents/view.py` | An agent record as Markdown with front matter (name, description, model, tools from permissions) + instructions. |
+| template | Concept | `app/templates/` | A recipe for a page tile: source kind (records or a Library file kind), schema, views and their settings, block layout, toolbar actions, extension. Built-ins in `builtin.py` (ids of the modules they replaced); yours in the workspace database. |
+| `TemplateSpec` | Class | `app/templates/spec.py` | A template as plain data (`to_dict()` / `from_dict()`). |
+| `TemplateModule` / `open_template()` | Class / function | `app/templates/module.py` | A template's tile (a SourceModule): file and table pickers, old modules' settings and layouts carried over, Save as template…; `show_file()`, `show_collection()`. |
+| template action | Concept | `app/templates/actions.py` | A toolbar action a template names: new_record, export_json, new_file, import_file, export_file, new_table, add_sheet, sample_graph, mock_dataset. |
+| `TemplateStore` | Class | `app/data/store/templates.py` | Your templates (`templates_user`): save, get, list, rename, delete. |
+| `AgentsExtension` | Class | `app/modules/agents/template.py` | What the Agents template adds: the Chat block, Chat / settings / Export agent file, "Chat with agent". |
+| `module_specs()` / `module_spec()` | Functions | `app/modules/registry.py` | Every template and module a tile can hold (the picker); one by id. |
+| `agent_definition()` | Function | `app/modules/agents/template.py` | An agent record as Markdown with front matter (name, description, model, tools from permissions) + instructions. |
 | provider | Concept | `app/modules/agents/engine.py` | Who runs an agent's model: Claude (Anthropic API), Gemini (Google AI API) or Ollama (local server). The agent's Provider property; `provider_of()` guesses it for older agents. |
 | `stream_chat()` / `ChatConfig` | Function / class | `app/modules/agents/engine.py` | One chat turn with a provider, streamed piece by piece; failures become `AgentError` with a message the user can act on. `chat_config()` turns an agent record into a `ChatConfig`. |
 | `ChatStore` / conversation | Class / concept | `app/modules/agents/store.py` | An agent's chats (`agents_conversations`, `agents_messages`); `get_chat_store()` shares one per database. Deleting an agent keeps its chats. |
@@ -401,8 +401,8 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `ToolDock` / `ToolTray` | Classes | `app/ui/toolbars.py` | Toolbars around every module tile: trays dock top / bottom / left / right or float, sizes, pin; saved in the module's `toolbars` setting. |
 | `run_in_thread()` | Function | `app/ui/ui_tools.py` | Slow work on a worker thread; `on_done(result, error)` back on the UI thread. With `on_progress`, `work(report)` streams values to the UI thread (chat answers). |
 | `status_label()` / `set_status()` | Functions | `app/ui/ui_tools.py` | A module's one-line outcome label (red when `is_error`). |
-| `SpreadsheetModule` / `Workbook` / `Sheet` | Classes | `app/modules/spreadsheet/`, `engines/toolkit/workbook.py` | Spreadsheet: grid with formula bar and sheet tabs; formulas in `engines/toolkit/formulas.py` (no eval; `[Field]` references for computed fields); xlsx / csv, LibreOffice for ods / xls / pdf. |
-| `GraphDbModule` / `GraphDb` | Classes | `app/modules/graph_db/`, `engines/toolkit/kuzu_db.py` | Kùzu graph databases (Library kind `graph`): schema, Cypher console, graph view, inspector. |
+| `Workbook` / `Sheet` | Classes | `engines/toolkit/workbook.py` | Workbooks of sheets of cells for the Data engine; formulas in `engines/toolkit/formulas.py` (no eval; `[Field]` references for computed fields); xlsx / csv, LibreOffice for ods / xls / pdf. |
+| `GraphDb` | Class | `engines/toolkit/kuzu_db.py` | A Kùzu graph database file (Library kind `graph`): Cypher, schema, sample of the graph; used by the Data engine. |
 | `MapModule` / `MapStore` | Classes | `app/modules/map/` | Leaflet map: base layers, places (SQLite `map_places`), GeoJSON layers (Library kind `geo`). |
 | `CadModule` / `Part` / `PartDesignWindow` | Classes | `app/modules/cad/` | CAD models in 3D (`MeshViewer`); parametric parts (sketches + pad / pocket / hole) designed in the Part Design window. |
 | `CommsModule` / `CommsStore` | Classes | `app/modules/comms/` | Email over IMAP / SMTP (passwords in the system keyring via `secrets.py`); text and calls are placeholders. |

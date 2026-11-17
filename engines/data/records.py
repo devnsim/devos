@@ -15,8 +15,9 @@
 #   - Requires: app.data.store (database, records: RecordCollection, PropertySpec), engines.toolkit (sql,
 #               table, formulas), engines.data.common. Runs on the Data engine's thread and connection.
 #   - Exposes: RecordsSource(database, name, defaults, noun), record_row(record), ensure_indexes(database,
-#              properties), check_formula(formula, properties), MIGRATIONS (records_adapter_defaults)
+#              properties), check_formula(formula, properties)
 # NOTES:
+#   - [2026-11-17] Phase 5c: the records_adapter_defaults migration is gone (schemas live on record_collections).
 #   - [2026-11-17] Phase 5b: structure() names it a record collection.
 #   - [2026-11-17] Created in Phase 5a of the engine plan (from the Phase 2 records engine, which it replaces).
 # ==============================================================================
@@ -52,12 +53,6 @@ from engines.toolkit.sql import compile_query, json_path_expr, run_compiled
 from engines.toolkit.table import run_query
 
 INDEXED_KINDS = ("select", "number", "date", "checkbox")
-MIGRATIONS = ["""
-    CREATE TABLE records_adapter_defaults (
-        collection TEXT PRIMARY KEY, noun TEXT NOT NULL DEFAULT 'record', properties_json TEXT NOT NULL DEFAULT '[]'
-    )
-"""]
-
 
 def record_row(record: Record) -> dict:
     return {"id": record.record_id, TITLE_KEY: record.title, **record.values,

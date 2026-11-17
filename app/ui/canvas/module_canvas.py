@@ -4,17 +4,18 @@
 #           with a "what goes here" dropdown; split from the corner icon to add more.
 # PURPOSE:
 #   1. ModuleTile: a CornerControlsTile (fading grip / split / close in the corner, no title bar).
-#   2. ModuleCanvas: a TileCanvas whose tiles hold module apps from MODULE_LIBRARY (picked in empty tiles).
+#   2. ModuleCanvas: a TileCanvas whose tiles hold module apps from module_specs() (templates and modules, picked in empty tiles).
 #   3. Saves the layout (tree, sizes, module + instance per tile) to SQLite and restores it.
 # CONTRACT:
 #   - Requires: app.ui.canvas.tile_canvas (CornerControlsTile, TileCanvas), app.ui.toolbars.ToolDock, app.modules.registry
-#               (MODULE_LIBRARY, MODULE_BY_ID, create_module), app.data.store.database.Database,
+#               (module_specs, module_spec, create_module), app.data.store.database.Database,
 #               app.data.activity_log, QSS selectors #module_canvas_panel, #module_tile_panel
-#   - Exposes: ModuleCanvas(database=None, page_key=None, library=MODULE_LIBRARY); add_library_module();
+#   - Exposes: ModuleCanvas(database=None, page_key=None, library=None); add_library_module();
 #              add_module() (empty tile); load_saved_layout(); save_layout(); plus TileCanvas API (emptied); ModuleTile;
 #              dock_module_tools(tile), add_toolbar_menu(menu, tool_dock), library_choices(library),
 #              create_library_module(kind, database, instance_id) (shared with the infinite canvas's cards)
 # NOTES:
+#   - [2026-11-17] Phase 5c: the picker offers templates (module_specs()); choices are read again for every new tile.
 #   - [2026-11-17] Tool-dock wiring, the "Add toolbar" menu, the picker choices and module creation moved into
 #                  helpers so the infinite canvas's module cards share them.
 #   - [2026-11-16] Module tiles hold their module in a ToolDock: grip menu → Add toolbar (top / bottom / left /
@@ -56,7 +57,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from app.data.activity_log import get_activity_log
 from app.data.store.database import Database
-from app.modules.registry import MODULE_BY_ID, MODULE_LIBRARY, ModuleSpec, create_module
+from app.modules.registry import ModuleSpec, create_module, module_spec, module_specs
 from app.ui.canvas.tile_canvas import CanvasTile, CornerControlsTile, TileCanvas
 from app.ui.toolbars import SIDE_TITLES, SIDES, ToolDock
 from app.ui.widgets.tiling_layout import DROP_ZONE_RIGHT
@@ -66,15 +67,17 @@ from app.ui.widgets.tiling_layout import DROP_ZONE_RIGHT
 # ==============================================================================
 # [2.1] module_tile
 # ==============================================================================
-def library_choices(library: tuple[ModuleSpec, ...] = MODULE_LIBRARY) -> list[tuple[str, str, str]]:
-    """(kind, title, description) for every module in the library: what empty tiles / cards offer."""
-    return [(spec.module_type_id, spec.title, spec.description) for spec in library]
+def library_choices(library: tuple[ModuleSpec, ...] | None = None, database: Database | None = None) -> list[tuple[str, str, str]]:
+    """(kind, title, description) of every template and module: what empty tiles / cards offer (asked again for
+    each new tile, so a template saved a moment ago is there)."""
+    return [(spec.module_type_id, spec.title, spec.description) for spec in (library or module_specs(database))]
 
 
 def create_library_module(kind: str, database: Database, instance_id: str | None) -> tuple[QWidget, str, str]:
     """A module app with its data context: (view, title, instance_id) - the shape create_content returns."""
     view, context = create_module(kind, database, instance_id)
-    return view, MODULE_BY_ID[kind].title, context.instance_id
+    spec = module_spec(kind, database)
+    return view, spec.title if spec else kind, context.instance_id
 
 
 def dock_module_tools(tile: CanvasTile) -> ToolDock:
@@ -127,8 +130,8 @@ class ModuleCanvas(TileCanvas):
     keeps_last_tile = False                    # an empty page shows "Create New" (canvas_page.py)
 
     def __init__(self, database: Database | None = None, page_key: str | None = None,
-                 library: tuple[ModuleSpec, ...] = MODULE_LIBRARY, parent: QWidget | None = None) -> None:
-        choices = library_choices(library) if database else []
+                 library: tuple[ModuleSpec, ...] | None = None, parent: QWidget | None = None) -> None:
+        choices = library_choices(library, database) if database else []
         super().__init__(choices, "module_canvas_panel", parent)
         self.database, self.page_key, self.library = database, page_key, library
         self.layout_changed.connect(self.save_layout)
@@ -137,6 +140,11 @@ class ModuleCanvas(TileCanvas):
 # ==============================================================================
 # [3.2] modules
 # ==============================================================================
+    def _new_tile(self):
+        if self.database is not None and self.library is None:
+            self.choices = library_choices(None, self.database)       # templates saved since the page opened
+        return super()._new_tile()
+
     def create_content(self, kind: str, instance_id: str | None, state: dict | None):
         if self.database is None:
             raise RuntimeError("ModuleCanvas needs a database to create library modules")

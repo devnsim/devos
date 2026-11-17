@@ -9,20 +9,24 @@
 #      10 kHz signal still show on a 1000-pixel plot.
 # CONTRACT:
 #   - Requires: numpy.
-#   - Exposes: window(times, values, start, end), resample(times, values, step, how), decimate(times, values, max_points)
+#   - Exposes: window(times, values, start, end), resample(times, values, step, how), decimate(times, values, max_points),
+#              MOCK_GENERATORS, mock_series(kind, points, amplitude, frequency, noise, seed) -> (x, y)
 # NOTES:
+#   - [2026-11-17] mock_series() / MOCK_GENERATORS moved here from the Graph module (Phase 5c: sample datasets).
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
 # ==============================================================================
 
 # ==============================================================================
 # [DEFINITIONS]
 # - times / values: Equal-length 1-D arrays; times ascending (seconds).
+# - MOCK_GENERATORS (dict): Name -> made-up series ("Sine wave", "Random walk", "Noise" ...).
 # ==============================================================================
 
 # ==============================================================================
 # [INDEX]
 # 1. SERIES_TOOLKIT
 #    1.1 operations
+#    1.2 mock_series
 # ==============================================================================
 
 # ==============================================================================
@@ -70,3 +74,45 @@ def decimate(times, values, max_points: int) -> tuple[np.ndarray, np.ndarray]:
     keep = np.array(keep)
     return times[keep], values[keep]
 # --- END [1.1] ---
+
+
+# ==============================================================================
+# [1.2] mock_series
+# ==============================================================================
+def _sine(x, amplitude, frequency, rng):
+    return amplitude * np.sin(2 * np.pi * frequency * x)
+
+
+def _random_walk(x, amplitude, frequency, rng):
+    return amplitude * np.cumsum(rng.normal(0, 1, len(x))) / np.sqrt(len(x))
+
+
+def _noise(x, amplitude, frequency, rng):
+    return amplitude * rng.normal(0, 1, len(x))
+
+
+def _sawtooth(x, amplitude, frequency, rng):
+    return amplitude * (2 * ((frequency * x) % 1) - 1)
+
+
+def _damped(x, amplitude, frequency, rng):
+    return amplitude * np.exp(-x / max(x[-1], 1e-9) * 3) * np.cos(2 * np.pi * frequency * x)
+
+
+def _growth(x, amplitude, frequency, rng):
+    return amplitude * np.exp(frequency * x / max(x[-1], 1e-9))
+
+
+MOCK_GENERATORS = {
+    "Sine wave": _sine, "Random walk": _random_walk, "Noise": _noise, "Sawtooth": _sawtooth,
+    "Damped oscillation": _damped, "Exponential growth": _growth,
+}
+
+
+def mock_series(kind: str, points: int = 500, amplitude: float = 1.0, frequency: float = 1.0,
+                noise: float = 0.0, seed: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """Made-up (x, y) to try charts with; x runs 0..10."""
+    rng = np.random.default_rng(seed)
+    x = np.linspace(0.0, 10.0, points)
+    return x, MOCK_GENERATORS[kind](x, amplitude, frequency, rng) + noise * rng.normal(0, 1, points)
+# --- END [1.2] ---

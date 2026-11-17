@@ -11,6 +11,8 @@
 #               #selector no widget uses, so this list can't silently go stale.
 #   - Exposes: STYLESHEET (str) and every *_COLOR / *_PX token, for widgets that need a color in code.
 # NOTES:
+#   - [2026-11-17] Phase 5c: styles of the removed Data-group modules dropped; #sql_editor / #formula_edit /
+#                  #cell_name_label now style Data's consoles and Sheet view; the Calendar module's styles too.
 #   - [2026-11-17] Notes / Library panels styles gone (they are SourceModules now); #document_title_label.
 #   - [2026-11-17] #records_module_panel became #source_module_panel (SourceModule, Phase 4).
 #   - [2026-11-17] View styles (#view_host_panel, #view_message_label, #view_menu_btn, #filter_bar_panel, #data_view_panel).
@@ -343,27 +345,7 @@ STATUS_BAR_QSS = f"""
 # ==============================================================================
 MODULE_QSS = f"""
 /* ---------- Modules (self-contained panels hosted by pages) ---------- */
-#module_panel {{ background: {PANEL_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: 0px; }}
-#module_panel QLabel {{ background: transparent; }}
 #module_title_label {{ font-weight: 600; }}
-/* Calendar module */
-#calendar_month_label {{ color: {TEXT_COLOR}; }}
-#calendar_selected_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; }}
-#calendar_nav_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 1px 6px; }}
-#calendar_nav_btn:hover {{ background: {HOVER_COLOR}; }}
-#calendar_weekday_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; padding: 2px 0px; }}
-#calendar_weekday_label[is_weekend="true"] {{ color: {SCROLLBAR_HOVER_COLOR}; }}
-#calendar_day_btn {{
-    background: {BACKGROUND_COLOR};
-    border: 1px solid transparent;
-    border-radius: {CORNER_RADIUS_PX}px;
-    color: {TEXT_COLOR};
-}}
-#calendar_day_btn[is_weekend="true"] {{ color: {MUTED_TEXT_COLOR}; }}
-#calendar_day_btn[is_outside_month="true"] {{ background: transparent; color: {SCROLLBAR_HOVER_COLOR}; }}
-#calendar_day_btn:hover {{ background: {HOVER_COLOR}; }}
-#calendar_day_btn[is_today="true"] {{ border: 1px solid {ACCENT_HIGHLIGHT_COLOR}; font-weight: 600; }}
-#calendar_day_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
 /* Tile canvases (tile_canvas.py): pages hold module tiles, modules hold block tiles */
 #module_canvas_panel, #block_canvas_panel {{ background: transparent; }}
 #tile_body_panel, #tile_picker_panel {{ background: transparent; }}
@@ -384,20 +366,16 @@ MODULE_QSS = f"""
 #live_toggle_btn {{ background: {HEADER_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: {CORNER_RADIUS_PX}px; padding: 2px 8px; }}
 #live_toggle_btn:hover {{ background: {HOVER_COLOR}; }}
 #live_toggle_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
-/* Tools: Graph, Notes, Library (+ their gear button and settings windows) */
-#graph_panel {{ background: transparent; }}
+/* Tools: Notes, Library (+ their gear button and settings windows) */
 #module_settings_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 3px; }}
 #module_settings_btn:hover {{ background: {HOVER_COLOR}; }}
 #document_title_label {{ font-weight: 600; background: transparent; padding: 0px 4px; }}
 #note_editor, #note_preview {{ background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR}; padding: 6px; }}
 #settings_dialog {{ background: {PANEL_COLOR}; }}
-/* Database Editor */
-#db_editor_panel, #record_form_panel {{ background: transparent; }}
-#db_status_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; padding: 0px 6px; }}
-#db_status_label[is_error="true"] {{ color: {ERROR_COLOR}; }}
-#db_tree {{ border: none; }}
+/* Record forms, Data's consoles (engines/data/views.py) */
+#record_form_panel {{ background: transparent; }}
 #structure_title_label {{ font-weight: 600; background: transparent; }}
-#sql_editor, #sql_preview_view, #structure_sql_view {{
+#sql_editor {{
     background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR};
     font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 12px;
 }}
@@ -405,7 +383,7 @@ MODULE_QSS = f"""
 #module_status_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; padding: 0px 6px; }}
 #module_status_label[is_error="true"] {{ color: {ERROR_COLOR}; }}
 /* Module panels without their own background */
-#source_module_panel, #spreadsheet_panel, #monitor_panel, #graph_db_panel, #map_panel, #web_app_panel, #comms_panel,
+#source_module_panel, #monitor_panel, #map_panel, #web_app_panel, #comms_panel,
 #cad_panel, #web_app_setup_panel {{ background: transparent; }}
 /* Views (app/views/): host, filter bar, board, form */
 #view_host_panel, #data_view_panel {{ background: transparent; }}
@@ -418,8 +396,8 @@ MODULE_QSS = f"""
 #record_title_edit {{ font-size: 15px; font-weight: 600; background: transparent; border: 1px solid transparent; }}
 #record_title_edit:focus {{ border: 1px solid {ACCENT_HIGHLIGHT_COLOR}; }}
 #record_meta_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; }}
-#record_long_text_edit, #cypher_editor, #mail_body_view {{ background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR}; }}
-#cypher_editor, #formula_edit {{ font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }}
+#record_long_text_edit, #mail_body_view {{ background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR}; }}
+#formula_edit {{ font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }}
 #menu_glyph_btn::menu-indicator {{ image: none; width: 0px; }}
 /* Agents chat (app/modules/agents/blocks.py) */
 #chat_messages_panel {{ background: transparent; }}
@@ -440,9 +418,8 @@ MODULE_QSS = f"""
 #tool_bag_popup {{ background: {PANEL_COLOR}; border: 1px solid {EDGE_COLOR}; }}
 #tool_bag_list {{ border: none; font-size: 13px; }}
 #tool_bag_list::item {{ padding: 4px 6px; }}
-/* Spreadsheet */
+/* Data's Sheet view */
 #cell_name_label {{ font-weight: 600; background: {HEADER_COLOR}; border: 1px solid {BORDER_COLOR}; padding: 2px 4px; }}
-#sheet_tab_bar::tab {{ padding: 3px 12px; }}
 /* Comms, Part Design */
 #comms_banner_label {{ color: {WARNING_COLOR}; background: {HEADER_COLOR}; border-left: 3px solid {WARNING_COLOR}; padding: 6px; }}
 #dial_btn {{ font-size: 16px; padding: 8px; }}

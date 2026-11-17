@@ -11,6 +11,8 @@
 #               manifold3d, openpyxl (shell.nix)
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] The toolbar test uses the Agents template's Chat tool (the Spreadsheet module is a template now).
+#   - [2026-11-17] Phase 5c: Projects and Agents are templates (create_module("projects", ...)); agent parts in agents/template.py.
 #   - [2026-11-17] Spreadsheet / graph database logic is imported from engines/toolkit/ (moved in Phase 5a).
 #   - [2026-11-17] Record views test goes through the records engine and ViewHosts (Phase 2).
 #   - [2026-11-16] Created with the records model, toolbars and nine new modules.
@@ -176,8 +178,8 @@ def test_cad_part_build():
 # [2.1] record_views
 # ==============================================================================
 def test_record_views_stay_in_sync(qapp, database, pump, wait_for):
-    from app.modules.projects.view import ProjectsModule
-    module = ProjectsModule()
+    from app.modules.registry import create_module
+    module, _context = create_module("projects", database)
     module.resize(1200, 700)
     module.show()
     pump()
@@ -200,7 +202,7 @@ def test_record_views_stay_in_sync(qapp, database, pump, wait_for):
 
 def test_agent_definition(qapp, database):
     from app.data.store.records import Record
-    from app.modules.agents.view import agent_definition
+    from app.modules.agents.template import agent_definition
     text = agent_definition(Record(1, "Code Reviewer", {"role": "Reviews PRs", "permissions": ["Read files", "Run commands"],
                                                         "model": "claude-sonnet-5-5", "instructions": "Be kind."}))
     assert "name: code-reviewer" in text and "tools: Read, Grep, Glob, Bash" in text and text.rstrip().endswith("Be kind.")
@@ -215,24 +217,24 @@ def test_toolbars_save_and_restore(qapp, database, pump):
     canvas = ModuleCanvas(database, "page:toolbar-test")
     canvas.resize(900, 600)
     canvas.show()
-    tile = canvas.add_library_module("spreadsheet")
+    tile = canvas.add_library_module("agents")                 # a template tile holds toolbars like any module
     pump()
-    assert [spec.tool_id for spec in search_tools("sum", "spreadsheet")] == ["spreadsheet.sum_below"]
-    assert search_tools("sum", None) == []                    # module tools stay out of the global search
+    assert [spec.tool_id for spec in search_tools("chat", "agents")] == ["agents.chat"]
+    assert search_tools("chat", None) == []                   # module tools stay out of the global search
     tray = tile.tool_dock.add_tray("top")
-    tray.add_tool(get_tool("spreadsheet.sum_below"))
+    tray.add_tool(get_tool("agents.chat"))
     tray.add_tool(get_tool("timestamp"))
     tile.tool_dock.move_tray(tray, "right")
     tray.set_icon_px(32)
     saved = tile.content_widget.context.settings.get("toolbars")
-    assert saved[0]["side"] == "right" and saved[0]["tools"] == ["spreadsheet.sum_below", "timestamp"]
+    assert saved[0]["side"] == "right" and saved[0]["tools"] == ["agents.chat", "timestamp"]
     tile.tool_dock.bind(tile.content_widget)                  # as when the page opens again
     restored = tile.tool_dock.trays[0]
-    assert (restored.side, restored.icon_px, restored.tool_ids) == ("right", 32, ["spreadsheet.sum_below", "timestamp"])
-    tile.content_widget.set_cells({(0, 0): "2", (1, 0): "3"})
-    tile.content_widget.set_selection([(0, 0), (1, 0)])
-    restored.buttons[0].click()                               # the tool runs on its module
-    assert tile.content_widget.sheet.value(2, 0) == 5
+    assert (restored.side, restored.icon_px, restored.tool_ids) == ("right", 32, ["agents.chat", "timestamp"])
+    tile.content_widget.block_canvas._set_active_tile(next(t for t in tile.content_widget.block_canvas.tiles.values()
+                                                            if t.kind == "table"))
+    restored.buttons[0].click()                               # the tool runs on its tile (the Agents extension)
+    assert tile.content_widget.block_canvas.active_tile.kind == "chat"
     canvas.deleteLater()
 # --- END [2.2] ---
 

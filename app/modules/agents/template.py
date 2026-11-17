@@ -1,22 +1,22 @@
 # ==============================================================================
-# FILE: app/modules/agents/view.py
-# OVERVIEW: Agents module - define AI agents as records (name, role, provider, model, status, permissions,
-#           tools, limits, instructions), see them as a table, a board, a form, and chat with them: Claude,
-#           Gemini or local Ollama agents.
+# FILE: app/modules/agents/template.py
+# OVERVIEW: The Agents template's own parts: agent properties, the agent definition file, and AgentsExtension
+#           (the Chat block, Chat / settings / Export agent file buttons, "Chat with agent" on every record).
+#           The Agents template (app/templates/builtin.py) is a records template over "agents" with this
+#           extension; chatting and running agents move to the Conversation engine in Phase 10.
 # PURPOSE:
-#   1. AgentsModule: a RecordsModule over the "agents" collection with agent properties; + New agent offers
-#      a Claude, Gemini or Ollama agent; a Chat view (blocks.ChatBlock) talks to the selected agent.
-#   2. Settings (⚙): API keys (system keyring, never the database) and the Ollama address.
-#   3. Export an agent as an agent definition file (Markdown with front matter: name, description, model,
-#      tools mapped from permissions, then the instructions) into the Library.
+#   1. AGENT_PROPERTIES, AGENT_PRESETS (Claude / Gemini / Ollama agent), agent_definition(record).
+#   2. AgentsExtension(module): extra_block_specs(), record_actions(), add_toolbar_actions(row); base_urls(),
+#      show_chat(), open_settings() (API keys in the system keyring, never the database; the Ollama address),
+#      export_agent_file() - reached through the template module (module.show_chat() ...).
 # CONTRACT:
-#   - Requires: app.modules.records_module.RecordsModule, app.modules.agents (engine, blocks),
-#               app.data.store.records, app.clients.library, app.ui.settings_dialog, app.ui.tool_bag
-#   - Exposes: AgentsModule(parent=None, context=None) with base_urls(), open_settings(), show_chat();
-#              AGENT_PROPERTIES, agent_definition(record) -> str, PERMISSION_TOOLS, OLLAMA_URL_PREFERENCE
+#   - Requires: app.modules.agents (engine, blocks), app.data.store (records, database, secrets),
+#               app.clients.library, app.ui (settings_dialog, tool_bag, ui_tools, canvas.block_canvas)
+#   - Exposes: AgentsExtension(module), AGENT_PROPERTIES, AGENT_PRESETS, agent_definition(record) -> str,
+#              PERMISSION_TOOLS, OLLAMA_URL_PREFERENCE
 # NOTES:
+#   - [2026-11-17] Phase 5c: AgentsModule became the Agents template + this extension (file moved from view.py).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
-#   - [2026-11-17] Uses module.focus (records engine) instead of the removed RecordsController.
 #   - [2026-11-17] Chat: Provider property (Claude / Gemini / Ollama), Max output tokens, + New agent menu, a Chat
 #                  view, Chat with agent in every view's record menu, ⚙ settings for API keys and Ollama.
 #   - [2026-11-16] Created. Agents are only defined here (no runtime yet): running them belongs to the
@@ -29,6 +29,7 @@
 #   reads from .claude/agents/); the body is the agent's instructions.
 # - PERMISSION_TOOLS (dict): Permission -> the tool names it grants in an agent definition.
 # - OLLAMA_URL_PREFERENCE (str): User preference holding the Ollama server address.
+# - AGENT_PRESETS (list): (+ New menu title, values) for a Claude, Gemini or Ollama agent.
 # ==============================================================================
 
 # ==============================================================================
@@ -36,7 +37,7 @@
 # 1. AGENTS
 #    1.1 properties
 #    1.2 agent_definition
-#    1.3 agents_module
+#    1.3 agents_extension
 #    1.4 settings
 #    1.5 tools
 # ==============================================================================
@@ -51,6 +52,7 @@ import re
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton
 
 from app.clients.library import library
+from app.data.activity_log import get_activity_log
 from app.data.store.database import get_database
 from app.data.store.records import PropertySpec, Record
 from app.data.store.secrets import secret_storage
@@ -58,11 +60,10 @@ from app.modules.agents.blocks import ChatBlock, forget_listed_models
 from app.modules.agents.engine import (
     DEFAULT_ENDPOINTS, DEFAULT_MODELS, KEY_ENVIRONMENT, KNOWN_MODELS, PROVIDERS, api_key, forget_api_key, set_api_key,
 )
-from app.modules.records_module import RecordsModule
 from app.ui.canvas.block_canvas import BlockSpec
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.tool_bag import ToolSpec, register_tools
-from app.ui.ui_tools import control_label, set_status, tool_button
+from app.ui.ui_tools import control_label, tool_button
 
 PERMISSION_TOOLS = {
     "Read files": ("Read", "Grep", "Glob"),
@@ -116,35 +117,34 @@ def agent_definition(record: Record) -> str:
 
 
 # ==============================================================================
-# [1.3] agents_module
+# [1.3] agents_extension
 # ==============================================================================
-class AgentsModule(RecordsModule):
-    COLLECTION = "agents"
-    NOUN = "agent"
-    PROPERTIES = AGENT_PROPERTIES
-    NEW_RECORD_PRESETS = [(f"{provider} agent", {"provider": provider, "model": DEFAULT_MODELS[provider], "status": "Draft"})
-                          for provider in PROVIDERS]
-    DEFAULT_LAYOUT = {"split": "h", "sizes": [3, 2, 3], "children": [
-        {"split": "v", "sizes": [3, 2], "children": [{"kind": "table"}, {"kind": "board"}]},
-        {"kind": "form"},
-        {"kind": "chat"},
-    ]}
+AGENT_PRESETS = [(f"{provider} agent", {"provider": provider, "model": DEFAULT_MODELS[provider], "status": "Draft"})
+                 for provider in PROVIDERS]
+
+
+class AgentsExtension:
+    """What the Agents template adds to its tile (the tile reaches these through module.<name>)."""
+
+    def __init__(self, module) -> None:
+        self.module = module
+        self.log = get_activity_log()
 
     def extra_block_specs(self) -> list[BlockSpec]:
         return [BlockSpec("chat", "Chat", "Talk to the selected agent (Claude, Gemini or Ollama); chats are kept per agent",
-                          lambda: ChatBlock(self))]
+                          lambda: ChatBlock(self.module))]
 
     def record_actions(self) -> list[tuple[str, object]]:
         return [("Chat with agent", self.show_chat)]
 
     def show_chat(self, record_id: int | None = None) -> None:
         if record_id is not None:
-            self.focus.select(record_id)
-        chat = self.block_canvas.show_block("chat")
+            self.module.focus.select(record_id)
+        chat = self.module.block_canvas.show_block("chat")
         chat.chat_input_edit.setFocus()
 
     def base_urls(self) -> dict[str, str]:
-        database = self.context.database if self.context is not None else get_database()
+        database = self.module.context.database if self.module.context is not None else get_database()
         return {"Ollama": database.get_preference(OLLAMA_URL_PREFERENCE) or DEFAULT_ENDPOINTS["Ollama"]}
 
     def add_toolbar_actions(self, row: QHBoxLayout) -> None:
@@ -160,15 +160,14 @@ class AgentsModule(RecordsModule):
         row.addWidget(export_btn)
 
     def export_agent_file(self) -> None:
-        record = self.focus.selected()
+        record = self.module.focus.selected()
         if record is None:
-            set_status(self.module_status_label, "Select an agent first", is_error=True)
+            self.module.report("Select an agent first", is_error=True)
             return
         with self.log.step("records:agents", f"Export agent file for “{record.title}”"):
             item = library().create_text("note", f"{agent_slug(record.title)} (agent)", agent_definition(record), ".md")
-        set_status(self.module_status_label, f"Saved “{item.name}” in your Library (Notes)")
+        self.module.report(f"Saved “{item.name}” in your Library (Notes)")
 # --- END [1.3] ---
-
 
 # ==============================================================================
 # [1.4] settings
@@ -176,7 +175,7 @@ class AgentsModule(RecordsModule):
     def open_settings(self) -> None:
         window = getattr(self, "settings_window", None)
         if window is None:
-            window = self.settings_window = SettingsDialog(self.window(), "Agents")
+            window = self.settings_window = SettingsDialog(self.module.window(), "Agents")
             form = window.add_form_tab("Providers")
             note = control_label(f"API keys are kept in: {secret_storage()} — never in the DevOS database. "
                                  "Without a saved key, the usual environment variable is used.")
@@ -215,7 +214,7 @@ class AgentsModule(RecordsModule):
             if edit.text().strip():
                 set_api_key(provider, edit.text())
                 changed.append(f"{provider} key")
-        database = self.context.database if self.context is not None else get_database()
+        database = self.module.context.database if self.module.context is not None else get_database()
         url = self.ollama_url_edit.text().strip().rstrip("/") or DEFAULT_ENDPOINTS["Ollama"]
         if url != self.base_urls()["Ollama"]:
             database.set_preference(OLLAMA_URL_PREFERENCE, url)
@@ -224,8 +223,8 @@ class AgentsModule(RecordsModule):
         self._read_settings()
         if changed:
             self.log.info("agents", f"Agents settings saved: {', '.join(changed)}")
-            set_status(self.module_status_label, f"Saved: {', '.join(changed)}")
-        for chat in self.block_canvas.blocks("chat"):
+            self.module.report(f"Saved: {', '.join(changed)}")
+        for chat in self.module.block_canvas.blocks("chat"):
             chat.reload_models()
 
     def _forget_key(self, provider: str) -> None:

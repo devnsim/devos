@@ -3,15 +3,19 @@
 # OVERVIEW: The module library: every module app DevOS can place on a canvas, and how to create one.
 # PURPOSE:
 #   1. ModuleSpec describes one module type (id, title, category, description, where its view lives).
-#   2. MODULE_LIBRARY lists them; the canvas "Add module" dropdown and empty tiles read it.
+#   2. MODULE_LIBRARY lists them; module_specs() adds every template (Phase 5c: built-ins under the ids of the
+#      modules they replaced, then the user's) - what empty tiles and Canvas cards offer.
 #   3. ModuleContext is what a module receives when created: its instance id, the shared database
 #      and its own persisted settings - the module's data layer.
 #   4. create_module() imports the view lazily (heavy modules cost nothing until placed).
 # CONTRACT:
 #   - Requires: app.data.store.database (Database, ModuleSettings); each view class must accept a
 #               keyword argument context: ModuleContext | None
-#   - Exposes: ModuleSpec, ModuleContext, MODULE_LIBRARY, MODULE_BY_ID, create_module()
+#   - Exposes: ModuleSpec, ModuleContext, MODULE_LIBRARY, MODULE_BY_ID, module_specs(), module_spec(), create_module()
 # NOTES:
+#   - [2026-11-17] Phase 5c: Projects, Agents, Calendar, Database Editor, Spreadsheet, Graph Database and Graph are
+#                  templates (app/templates/) under the same ids; module_specs() / module_spec() list them; the
+#                  Data view is offered as "New view of an engine…"; a deleted template's tile says so.
 #   - [2026-11-17] Data view module (engine plan Phase 2): a ViewHost as a page tile or a Canvas card.
 #   - [2026-11-16] Added Spreadsheet, Graph Database (Kùzu), Map (GIS), Projects, Agents, CAD · Part Design,
 #                  Comms, Software Monitor and Web App.
@@ -29,7 +33,8 @@
 # [DEFINITIONS]
 # - factory_path (str): "package.module:ClassName" of the module's view widget, imported on demand.
 # - module app: A small app shown in a tile: view (UI) + engine (logic, maybe C++) + store (SQLite).
-# - module_type_id (str): Stable id of a module type; saved in layouts, so never rename one.
+# - module_type_id (str): Stable id of a module type (or template); saved in layouts, so never rename one.
+# - TEMPLATE_FACTORY (str): The factory every template tile is made by (app.templates.module:open_template).
 # ==============================================================================
 
 # ==============================================================================
@@ -95,9 +100,6 @@ class ModuleSpec:
 # [3.1] module_library
 # ==============================================================================
 MODULE_LIBRARY: tuple[ModuleSpec, ...] = (
-    ModuleSpec("graph", "Graph", "Tools",
-               "2D graph of a dataset; ⚙ settings to browse, import or create data and style the graph.",
-               "app.modules.graph.view:GraphModule"),
     ModuleSpec("trading_chart", "Financial Chart", "Tools",
                "Candlestick chart with indicators, drawings and backtests; ⚙ settings for data, theme, indicators.",
                "app.modules.trading_chart.view:TradingChartModule"),
@@ -113,32 +115,16 @@ MODULE_LIBRARY: tuple[ModuleSpec, ...] = (
     ModuleSpec("wave_sim", "RF Wave Simulator · 1–10 GHz", "RF & sensing",
                "Physics engine: oscillator + antenna in an imported CAD scene, dielectric ray tracing, 4D CSI tensor.",
                "app.modules.wave_sim.view:WaveSimModule"),
-    ModuleSpec("db_editor", "Database Editor", "Data",
-               "Create and manage your own SQLite databases: explorer, data grid, record form, structure, SQL console.",
-               "app.modules.db_editor.view:DbEditorModule"),
     ModuleSpec("tensor_inspector", "Tensor Inspector (4D)", "Data",
                "Waterfall + 3D scatter blocks for any 4D NumPy tensor (live demo field by default).",
                "app.modules.tensor_inspector.view:TensorInspectorModule"),
-    ModuleSpec("spreadsheet", "Spreadsheet", "Data",
-               "Workbooks with formulas, sheet tabs, selection stats and charts; .xlsx / .ods / .csv (LibreOffice for more).",
-               "app.modules.spreadsheet.view:SpreadsheetModule"),
-    ModuleSpec("graph_db", "Graph Database (Kùzu)", "Data",
-               "Embedded graph databases: schema, Cypher console, interactive graph view, inspector.",
-               "app.modules.graph_db.view:GraphDbModule"),
     ModuleSpec("map", "Map (GIS)", "Data",
                "Slippy map with base layers, your places and GeoJSON layers from the library.",
                "app.modules.map.view:MapModule"),
-    ModuleSpec("data_view", "Data view", "Data",
-               "Any data as a table, board, timeline, calendar or form: choose the data, its fields and a filter.",
+    ModuleSpec("data_view", "New view of an engine…", "Data",
+               "Any data of any engine as a table, grid, board, timeline, calendar, chart or form: choose the data, "
+               "its fields and a filter.",
                "app.modules.data_view.view:DataViewModule"),
-    ModuleSpec("calendar", "Calendar", "Planning", "Month calendar; remembers the selected day.",
-               "app.modules.calendar.view:CalendarModule"),
-    ModuleSpec("projects", "Projects", "Planning",
-               "Every project is a record: board, table, timeline (Gantt), calendar and form views of the same data.",
-               "app.modules.projects.view:ProjectsModule"),
-    ModuleSpec("agents", "Agents", "AI",
-               "Define agents as records: role, type, model, permissions, tools, instructions; export agent files.",
-               "app.modules.agents.view:AgentsModule"),
     ModuleSpec("cad", "CAD · Part Design", "Engineering",
                "CAD models in 3D with measurements; design parts step by step in the Part Design workbench.",
                "app.modules.cad.view:CadModule"),
@@ -153,6 +139,21 @@ MODULE_LIBRARY: tuple[ModuleSpec, ...] = (
                "app.modules.web_app.view:WebAppModule"),
 )
 MODULE_BY_ID = {spec.module_type_id: spec for spec in MODULE_LIBRARY}
+TEMPLATE_FACTORY = "app.templates.module:open_template"
+
+
+def module_specs(database: Database | None = None) -> tuple[ModuleSpec, ...]:
+    """What a tile can hold: every template (built-in, then yours) and the modules not yet made templates."""
+    from app.templates import all_templates
+    templates = tuple(ModuleSpec(spec.template_id, spec.title, spec.category, spec.description, TEMPLATE_FACTORY)
+                      for spec in all_templates(database))
+    return templates + MODULE_LIBRARY
+
+
+def module_spec(kind: str, database: Database | None = None) -> ModuleSpec | None:
+    if kind in MODULE_BY_ID:
+        return MODULE_BY_ID[kind]
+    return next((spec for spec in module_specs(database) if spec.module_type_id == kind), None)
 # --- END [3.1] ---
 
 # ==============================================================================
@@ -162,8 +163,12 @@ def create_module(module_type_id: str, database: Database, instance_id: str | No
     """Create a module's view. A new instance_id is registered unless an existing one is given
     (restoring a saved layout), in which case the module finds its saved settings and data.
     Never raises: a module that fails to start is logged (with traceback) and shown as an error panel."""
-    spec = MODULE_BY_ID[module_type_id]
+    spec = module_spec(module_type_id, database)
     log = get_activity_log()
+    if spec is None:                                    # a deleted user template: its settings stay in the database
+        label = QLabel(f"“{module_type_id}” no longer exists (its template was deleted). Its data is kept.",
+                       objectName="module_error_label", alignment=Qt.AlignmentFlag.AlignCenter, wordWrap=True)
+        return label, ModuleContext(instance_id or "", module_type_id, database, ModuleSettings(database, instance_id or ""))
     is_new = instance_id is None
     instance_id = database.register_instance(module_type_id, spec.title, instance_id)
     context = ModuleContext(instance_id, module_type_id, database, ModuleSettings(database, instance_id))

@@ -4,7 +4,7 @@ What DevOS stores today, where, who writes it, and which engine of the [engine p
 
 **Owner** is the engine that will be the only code allowed to read and write that data directly. **Workspace** means it describes how your desk is arranged, and stays in the workspace database (`devos.sqlite3`) after the engine phases.
 
-As of 2026-11-17 (Phase 5a: Data owns record collections and reads / writes the Library's tables; Knowledge owns the Library; phase numbers follow the plan's renumbering with Docking, Spatial and Displays).
+As of 2026-11-17 (Phase 5 done: templates replace the Data-group modules; Phase 5a: Data owns record collections and reads / writes the Library's tables; Knowledge owns the Library; phase numbers follow the plan's renumbering with Docking, Spatial and Displays).
 
 ## The data folder
 
@@ -21,8 +21,9 @@ As of 2026-11-17 (Phase 5a: Data owns record collections and reads / writes the 
 | pages | `page_folders`, `pages` | `PageStore` | Your pages, folders, favourites, page kind and state | Workspace | stays |
 | activity_log | `log_sessions`, `log_entries` | `ActivityLog.flush()` | System Log history | Workspace | stays |
 | content | `content_items` | The Knowledge engine only (`engines/knowledge/store.py`, its own connection) since Phase 4; everything else asks it (`app.clients.library`) | Index of Library files: name, kind, file name, size, metadata | Knowledge | done (4) |
-| records | `record_collections`, `record_items` (+ expression indexes `record_items_value_*`) | The Data engine (`engines/data/records.py`, its own connection) since Phase 5a | Records with JSON values (indexed); user-added properties, formula properties (computed, never stored) | Data | done (5a) |
-| records_adapter | `records_adapter_defaults` | The Data engine (`register`) | Each collection's declared default properties and noun | Data (replaced by template schemas) | 5c |
+| records | `record_collections` (+ `noun`, `defaults_json`: the collection's schema from its template, since 5c), `record_items` (+ expression indexes `record_items_value_*`) | The Data engine (`engines/data/records.py`, its own connection) since Phase 5a | Records with JSON values (indexed); user-added properties, formula properties (computed, never stored) | Data | done (5a) |
+| records_adapter | `records_adapter_defaults` | Nobody since Phase 5c (Data copies it onto `record_collections` at start) | Phase 2's collection schemas | Data | kept one version, then removed |
+| templates | `templates_user` | `TemplateStore` (Save as template…) | Your templates: views, settings and layout as JSON (never data) | Workspace | stays |
 | map | `map_places` | `MapStore` | Your places | Spatial (copied into a GeoPackage layer) | 6a |
 | agents | `agents_conversations`, `agents_messages` | `ChatStore` | Agent chats | Conversation | 10 |
 | comms | `comms_accounts`, `comms_messages`, `comms_threads`, `comms_texts` | `CommsStore` | Mail accounts, cached mail headers and bodies, local text threads | Conversation | 10 |

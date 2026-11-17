@@ -13,6 +13,7 @@
 #   - Requires: tests/conftest.py fixtures, engines (kernel, toolkit, records), app.views, app.modules
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 5c: Projects and Agents are templates (create_module("projects", ...)); agent parts in agents/template.py.
 #   - [2026-11-17] Record collections are the Data engine's now (Phase 5a).
 #   - [2026-11-17] Created in Phase 2 of the engine plan.
 # ==============================================================================
@@ -236,11 +237,10 @@ def test_view_definitions_are_saved_and_old_block_settings_survive(qapp, databas
 # [2.5] builder_and_data_view
 # ==============================================================================
 def test_builder_makes_a_filtered_board_and_a_data_view_shows_it(qapp, database, pump, wait_for):
-    from app.modules.projects.view import ProjectsModule
     from app.modules.registry import create_module
     from app.views.api import make_definition
     from app.views.builder import ViewBuilderDialog
-    module = ProjectsModule()
+    module, _context = create_module("projects", database)
     module.resize(1200, 700)
     module.show()
     module.create_record({"status": "Blocked"}, "Builder blocked")

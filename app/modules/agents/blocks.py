@@ -8,13 +8,14 @@
 #   2. Sending runs off the UI thread (run_in_thread with progress); Stop keeps the answer so far; a failed
 #      turn puts your message back in the box and says what went wrong (missing key, Ollama not running).
 # CONTRACT:
-#   - Requires: app.modules.agents (engine, store), app.modules.records_module.RecordFocus (module.focus),
+#   - Requires: app.modules.agents (engine, store), app.modules.source_module.RecordFocus (module.focus),
 #               app.ui.ui_tools, app.clients.library, QSS selectors #chat_messages_panel,
 #               #chat_message_panel[role], #chat_caption_label, #chat_message_label, #chat_input_edit,
 #               #chat_agent_label
 #   - Exposes: ChatBlock(module) (module: focus, context, base_urls()) with reload_models(); ChatInput;
 #              forget_listed_models()
 # NOTES:
+#   - [2026-11-17] Phase 5c: the module is the Agents template's tile (focus, context, base_urls() via AgentsExtension).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-17] Follows module.focus (the page's selected agent, from the records engine) instead of the old controller.
 #   - [2026-11-17] Created: chat with agents directly in the Agents module.

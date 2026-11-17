@@ -26,6 +26,7 @@ This is the design. Status and the phases are in [ROADMAP.md](../../ROADMAP.md);
 | **Records keep JSON values, with indexes** (not typed columns): a new property never needs a migration; filters and sorts run in SQLite through `json_extract`, backed by expression indexes for select / number / date / checkbox properties; formula properties are computed, never stored | 2026-11-17 |
 | **Engines may ask engines they declare** (`EngineManifest.uses` + engine.json): `Engine.ask()` waits for the answer; no cycles; the asker carries on without it when it's missing. Data asks Knowledge for files | 2026-11-17 |
 | **Engines hear the engines they use** (`Engine.watch`, declared in `uses`): events join the engine's inbox and are handled on its thread, in order with requests. Knowledge's `refresh_size` announces in-place changes (`by` names who made them), so Data refreshes views of files other tools changed | 2026-11-17 |
+| **Templates replace modules under the same ids**, so saved pages open them unchanged; old block layouts are translated (legacy_blocks), old settings read once. User templates live in the workspace database (`templates_user`), like pages; collection schemas move onto `record_collections` (from `records_adapter_defaults`, kept one version) | 2026-11-17 |
 | **Specialist views ship with their engine** (Data: Sheet, SQL / Cypher consoles, Structure); generic ones (Grid, Chart, Network) are built in. `ViewType.accepts` keeps a view to the sources it fits | 2026-11-17 |
 | **One Data collection id per table:** record collections by name; file tables `db:<item>/<table>`, `csv:<item>`, `sheet:<item>/<sheet>`, `graph:<item>/<node table>`; the shape names the row key (`_rowid` for file tables) | 2026-11-17 |
 | **Writes keep the file's own format:** sheets are edited in place (openpyxl, formatting kept); formula cells, a node's key and views are refused, with the reason | 2026-11-17 |
@@ -149,8 +150,8 @@ The phases, their status, what comes now and next, and the open questions live i
 | Today | Engine | Becomes | Phase |
 |---|---|---|---|
 | Notes, Library | Knowledge | Notes, Library templates | 4 |
-| Projects, Calendar, Database Editor, Spreadsheet, Graph Database, Graph | Data | Templates and view types (chart, calendar, grid, network …) | 5 |
-| Agents | Data + Conversation | Agents template: definitions (5), chat and runtime (10) | 5 · 10 |
+| Projects, Calendar, Database Editor, Spreadsheet, Graph Database, Graph | Data | Templates Projects, Events, Database, Spreadsheet, Graph database, Dataset chart (same ids); view types grid, chart, network, sheet, consoles, structure | 5 ✔ |
+| Agents | Data + Conversation | Agents template: definitions (5 ✔), chat and runtime (10) | 5 · 10 |
 | Map | Spatial | Map view type; Map, Places, Census explorer templates | 6 |
 | Physics, CAD + Part Design, Wave Simulator, RF Imaging, Tensor Inspector | Simulation | Physics scene, Part Design, RF lab templates; waterfall / scatter / slice view types | 8 |
 | Financial Chart | Signals | Market chart template | 9 |

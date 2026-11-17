@@ -15,9 +15,10 @@
 #   - Requires: app.modules.base.ModuleView, app.views (api, host, channels, subscriptions, builder, types),
 #               app.ui.engine_bridge, app.data.store.records (Record, TITLE_KEY), app.ui.ui_tools,
 #               QSS selector #source_module_panel
-#   - Exposes: SourceModule(parent=None, context=None) with source, focus, block_canvas, make_host(),
-#              module_status_label, count_label; RecordFocus(module, source); record_from_row(row)
+#   - Exposes: SourceModule(parent=None, context=None) with source, set_source(), focus, block_canvas, make_host(),
+#              module_status_label, count_label; RecordFocus(module, source) with set_source(); record_from_row(row)
 # NOTES:
+#   - [2026-11-17] Phase 5c: set_source() (a template tile switching table or file); RecordFocus.set_source().
 #   - [2026-11-17] Created in Phase 4 of the engine plan from RecordsModule's generic half (RecordFocus moved
 #                  here; it matches change events by the source's keys, so Library sources work too).
 # ==============================================================================
@@ -89,6 +90,14 @@ class RecordFocus(QObject):
             self._hub = hub
             hub.changed.connect(self._on_channel)
             self._on_channel(self.channel, hub.get(self.channel))
+
+    def set_source(self, source: dict) -> None:
+        """Follow another source (a template tile switched table or file): its own selection channel."""
+        self.source, self.channel = dict(source), selection_channel(source)
+        self.selected_id, self._record = None, None
+        if self._hub is not None:
+            self._on_channel(self.channel, self._hub.get(self.channel))
+        self.selection_changed.emit()
 
     def selected(self) -> Record | None:
         return self._record if self._record is not None and self._record.record_id == self.selected_id else None
@@ -179,7 +188,8 @@ class SourceModule(ModuleView):
         layout.addWidget(self.block_canvas, 1)
         self.focus.status.connect(lambda text, is_error: set_status(self.module_status_label, text, is_error))
         self.focus.selection_changed.connect(lambda: self.save_setting(self.SELECTED_SETTING, self.focus.selected_id))
-        shared_queries().subscribe(self, self.source, {"limit": 0})        # just the count
+        self._count_key = shared_queries().subscribe(self, self.source, {"limit": 0}) \
+            if self.source.get("collection") else None                     # just the count
 
     def _block_specs(self) -> list[BlockSpec]:
         specs = []
@@ -195,6 +205,25 @@ class SourceModule(ModuleView):
         kind = view_type(type_id)
         return BlockSpec(type_id, kind.title if kind else type_id, kind.description if kind else "",
                          lambda: self.make_host(self.block_definition(type_id)))
+
+    def set_source(self, source: dict) -> None:
+        """Show other data (another table or file of the same kind): the focus, the count and every view follow;
+        each view keeps its type, mapping and presentation (its filter and sort belonged to the old data)."""
+        if source == self.source:
+            return
+        self.source = dict(source)
+        self.focus.set_source(self.source)
+        queries = shared_queries()
+        if self._count_key is not None:
+            queries.unsubscribe(self, self._count_key)
+        self._count_key = queries.subscribe(self, self.source, {"limit": 0}) if self.source.get("collection") else None
+        self.count_label.clear()
+        for host in self.block_canvas.blocks():
+            if isinstance(host, ViewHost):
+                definition = host.block_state()
+                definition["source"] = dict(self.source)
+                definition["query"] = {key: value for key, value in definition["query"].items() if key == "limit"}
+                host.set_definition(definition)
 
     def block_definition(self, type_id: str) -> dict:
         """Hook: the definition a new block of this view type starts from."""

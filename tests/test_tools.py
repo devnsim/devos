@@ -4,12 +4,13 @@
 # PURPOSE:
 #   1. Activity log: levels, step() success / failure, persistence per session.
 #   2. Content library and preferences: add / read / rename / delete; values survive.
-#   3. Tools: a new page shows Create New (New Module -> the module dropdown); Graph, Notes, Library and Financial Chart work;
+#   3. Tools: a new page shows Create New (New Module -> the module dropdown); the Dataset chart template, Notes, Library and Financial Chart work;
 #      a broken module becomes an error panel instead of crashing.
 # CONTRACT:
 #   - Requires: tests/conftest.py fixtures (qapp, database, pump), app.data, app.modules, app.ui
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 5c: the Graph tool test uses the Dataset chart template; the broken-module test uses the Software Monitor.
 #   - [2026-11-17] Library and Notes tests use library() and the Notes module's document view (Phase 4).
 #   - [2026-11-16] New pages start with the Create New panel (no automatic module tile).
 #   - [2026-11-15] Created with the System Log, content library and tools.
@@ -87,15 +88,17 @@ def test_new_page_starts_empty_with_create_new(qapp, database, pump, wait_for):
     assert wait_for(lambda: database.load_layout("page:9999") is None)
 
 
-def test_graph_with_mock_data(qapp, database, pump):
+def test_dataset_chart_template_makes_sample_data(qapp, database, pump, wait_for):
     from app.modules.registry import create_module
-    graph, _ = create_module("graph", database)
-    graph.open_settings()
-    graph.mock_kind_combo.setCurrentText("Sine wave")
-    graph._on_create_mock()
-    assert graph.dataset is not None and graph.dataset.data.shape == (500, 2)
-    assert "500 points" in graph.dataset_label.text()
-    graph.settings_window.hide()
+    from app.templates.actions import make_mock_dataset
+    chart, _ = create_module("graph", database)                    # the Graph module is the Dataset chart template now
+    chart.resize(1000, 600)
+    chart.show()
+    item_id = make_mock_dataset(chart, "Sine wave", 500)
+    assert wait_for(lambda: chart.source["collection"] == f"csv:{item_id}", 5)
+    host = chart.block_canvas.blocks("chart")[0]
+    assert wait_for(lambda: host.view is not None and host.view.summary_label.text() == "500 points of 500 rows", 5)
+    chart.deleteLater()
 
 
 def test_notes_autosave(qapp, database, pump, wait_for):
@@ -129,9 +132,9 @@ def test_financial_chart_settings(qapp, database, pump):
 def test_broken_module_becomes_error_panel(qapp, database, monkeypatch):
     from app.data.activity_log import get_activity_log
     from app.modules import registry
-    broken = registry.ModuleSpec("calendar", "Calendar", "Planning", "", "app.modules.not_a_module:Nope")
-    monkeypatch.setitem(registry.MODULE_BY_ID, "calendar", broken)
-    view, _ = registry.create_module("calendar", database)
+    broken = registry.ModuleSpec("monitor", "Software Monitor", "System", "", "app.modules.not_a_module:Nope")
+    monkeypatch.setitem(registry.MODULE_BY_ID, "monitor", broken)
+    view, _ = registry.create_module("monitor", database)
     assert view.objectName() == "module_error_label"
-    assert any("Start Calendar: FAILED" in entry.message for entry in get_activity_log().entries)
+    assert any("Start Software Monitor: FAILED" in entry.message for entry in get_activity_log().entries)
 # --- END [1.3] ---

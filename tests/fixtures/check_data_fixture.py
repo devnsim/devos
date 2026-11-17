@@ -14,6 +14,7 @@
 #   - Requires: the DevOS app, offscreen platform. Writes only inside the given folder.
 #   - Exposes: a JSON report (same keys as the expectations, plus "errors": error-level log messages)
 # NOTES:
+#   - [2026-11-17] Phase 5c: the user database is found through library() (the Database Editor is now a template).
 #   - [2026-11-17] Reads the Library through library() (the Knowledge engine owns it since Phase 4).
 #   - [2026-11-17] Waits for page titles to settle (a browser page renames itself while its site loads).
 #   - [2026-11-17] Created in Phase 0 of the engine plan.
@@ -73,7 +74,6 @@ def report() -> dict:
     from app.data.store.records import get_collection
     from app.modules.agents.store import get_chat_store
     from app.modules.comms.engine import CommsStore
-    from app.modules.db_editor.engine import UserDatabases
     from app.modules.map.store import MapStore
     from app.ui.main_window import MainWindow
     database = get_database()
@@ -100,8 +100,8 @@ def report() -> dict:
     store = library()
     library = [{"kind": item.kind, "name": item.name, "sha256": hashlib.sha256(store.path(item).read_bytes()).hexdigest()}
                for kind in ("note", "dataset") for item in store.items(kind) if item.name.startswith("Fixture")]
-    user_db = next(entry for entry in UserDatabases().entries() if entry.name == "Fixture inventory")
-    connection = sqlite3.connect(user_db.path)
+    user_db = next(item for item in store.items("database") if item.name == "Fixture inventory")
+    connection = sqlite3.connect(store.path(user_db))
     rows = [list(row) for row in connection.execute("SELECT name, qty FROM parts ORDER BY part_id")]
     connection.close()
     agents = get_collection("agents", [], database)

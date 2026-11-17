@@ -19,8 +19,11 @@
 #   - Requires: engines.kernel, engines.data (common, records, tables, grids, graphs), app.data.store
 #               (database, records). Own connection on its thread. Uses Knowledge (engine.json "uses").
 #   - Exposes: DataEngine (MANIFEST id "data"), MANIFEST
-#   - Owns: record_collections, record_items, records_adapter_defaults (+ expression indexes on record_items).
+#   - Owns: record_collections (+ each collection's schema: noun, defaults_json), record_items (+ expression
+#     indexes). Reads records_adapter_defaults once (Phase 2's table, kept one version) to copy its schemas.
 # NOTES:
+#   - [2026-11-17] Phase 5c: create_file (new database / workbook / dataset / graph) and add_sheet, for templates.
+#   - [2026-11-17] Phase 5c: collection schemas live on record_collections (copied from records_adapter_defaults).
 #   - [2026-11-17] Phase 5b: structure, cells, set_cell, sql, cypher; graph takes a collection.
 #   - [2026-11-17] Phase 5b: watches knowledge.changed - files changed by other tools refresh their Data views.
 #   - [2026-11-17] Created in Phase 5a of the engine plan (replaces the Phase 2 records engine).
@@ -55,7 +58,7 @@ from app.data.store.records import MIGRATIONS as RECORD_MIGRATIONS
 from app.data.store.records import NAMESPACE as RECORD_NAMESPACE
 from app.data.store.records import PropertySpec
 from engines.data.common import FILE_KINDS, FileRef, Source, file_collection, parse_collection
-from engines.data.records import MIGRATIONS, RecordsSource, ensure_indexes
+from engines.data.records import RecordsSource, ensure_indexes
 from engines.kernel import Engine, EngineError, EngineManifest, Job, Reply, RequestSpec, shapes
 
 C = ("collection",)
@@ -64,7 +67,7 @@ LISTED_KINDS = {kind: prefix for prefix, kind in FILE_KINDS.items()}
 MANIFEST = EngineManifest(
     "data", "Data", "0.2", "Tables of every kind: records, your databases, datasets, sheets and graphs.",
     requests=(
-        RequestSpec("collections", "Every table Data can show, with its noun and size", optional=("kinds",),
+        RequestSpec("collections", "Every table Data can show, with its noun and size", optional=("kinds", "item_id"),
                     example={"kinds": ["records"]}),
         RequestSpec("schema", "A collection's fields", params=C),
         RequestSpec("query", "Rows of a collection as a Table shape (Query v1)", params=C, optional=("query",),
@@ -85,6 +88,9 @@ MANIFEST = EngineManifest(
         RequestSpec("graph", "The nodes and relationships of a graph table's database (a sample)", params=C,
                     optional=("limit",), shape="graph"),
         RequestSpec("structure", "How a collection is built: columns, keys, indexes, relationships", params=C),
+        RequestSpec("create_file", "A new database, workbook, dataset or graph in the Library (with a first table)",
+                    params=("kind", "name"), effect=W),
+        RequestSpec("add_sheet", "A new sheet in a sheet's workbook", params=C + ("name",), effect=W),
         RequestSpec("cells", "A sheet's cells: what was typed and what shows", params=C),
         RequestSpec("set_cell", "Type into a sheet cell (formulas too)", params=C + ("row", "col", "raw"), effect=W),
         RequestSpec("sql", "Run SQL on a table's database (results of each statement)", params=C + ("sql",),
@@ -94,7 +100,7 @@ MANIFEST = EngineManifest(
     ),
     events=("changed",),
     shapes=("table", "graph"),
-    owns=("record_collections", "record_items", "records_adapter_defaults"),
+    owns=("record_collections", "record_items"),
     uses=("knowledge",),
 )
 # --- END [1.1] ---
@@ -109,7 +115,7 @@ class DataEngine(Engine):
     def start(self) -> None:
         self.database = Database(data_directory() / DATABASE_FILE_NAME)
         self.database.migrate(RECORD_NAMESPACE, RECORD_MIGRATIONS)
-        self.database.migrate("records_adapter", MIGRATIONS)    # the Phase 2 name: same table, now Data's
+        self._copy_adapter_defaults()
         self._sources: dict[str, Source] = {}
         self._graphs: dict[int, object] = {}
         self.watch("knowledge.changed", self._library_changed)   # files changed by other tools, renamed, deleted
@@ -154,16 +160,34 @@ class DataEngine(Engine):
 # ==============================================================================
 # [1.3] sources
 # ==============================================================================
+    def _copy_adapter_defaults(self) -> None:
+        """Phase 5c: collection schemas moved from records_adapter_defaults (Phase 2) onto record_collections.
+        Copied once, never moved: the old table stays for one version (docs/architecture/data-ownership.md)."""
+        if self.database.fetch_one("SELECT 1 FROM sqlite_master WHERE name = 'records_adapter_defaults'") is None:
+            return
+        copied = 0
+        for row in self.database.fetch_all("SELECT collection, noun, properties_json FROM records_adapter_defaults"):
+            current = self.database.fetch_one("SELECT defaults_json FROM record_collections WHERE collection = ?",
+                                              (row["collection"],))
+            if current is None:
+                self.database.execute("INSERT INTO record_collections (collection, noun, defaults_json) VALUES (?, ?, ?)",
+                                      (row["collection"], row["noun"], row["properties_json"]))
+                copied += 1
+            elif current["defaults_json"] == "[]" and row["properties_json"] != "[]":
+                self.database.execute("UPDATE record_collections SET noun = ?, defaults_json = ? WHERE collection = ?",
+                                      (row["noun"], row["properties_json"], row["collection"]))
+                copied += 1
+        if copied:
+            self.log("info", f"Copied {copied} collection schema(s) from records_adapter_defaults (kept as it was)")
+
     def _defaults(self, name: str) -> tuple[list[PropertySpec], str]:
-        row = self.database.fetch_one("SELECT noun, properties_json FROM records_adapter_defaults WHERE collection = ?",
-                                      (name,))
+        row = self.database.fetch_one("SELECT noun, defaults_json FROM record_collections WHERE collection = ?", (name,))
         if row is None:
             return [], "record"
-        return [PropertySpec.from_dict(item) for item in json.loads(row["properties_json"])], row["noun"]
+        return [PropertySpec.from_dict(item) for item in json.loads(row["defaults_json"])], row["noun"]
 
     def _record_names(self) -> list[str]:
-        return sorted({row[0] for row in self.database.fetch_all("SELECT collection FROM record_collections")} |
-                      {row[0] for row in self.database.fetch_all("SELECT collection FROM records_adapter_defaults")})
+        return [row[0] for row in self.database.fetch_all("SELECT collection FROM record_collections ORDER BY collection")]
 
     def _library(self, kind: str) -> list[dict]:
         """Library items of a kind, or [] when Knowledge isn't there (record collections still work)."""
@@ -248,13 +272,16 @@ class DataEngine(Engine):
     def on_collections(self, payload: dict, _job: Job) -> dict:
         kinds = payload.get("kinds") or ["records", *LISTED_KINDS]
         entries = []
-        if "records" in kinds:
+        if "records" in kinds and payload.get("item_id") is None:
             for name in self._record_names():
                 source = self._source(name, must_exist=False)
                 entries.append({"collection": name, "title": source.title, "noun": source.noun, "count": source.count(),
                                 "kind": "records"})
+        only = payload.get("item_id")
         for kind in (kind for kind in LISTED_KINDS if kind in kinds):
             for item in self._library(kind):
+                if only is not None and item["item_id"] != int(only):
+                    continue
                 try:
                     tables = self._file_tables(kind, item)
                 except Exception as error:              # one unreadable file never hides the others
@@ -317,8 +344,8 @@ class DataEngine(Engine):
             raise EngineError("Record collection names can't contain “:”", code="invalid_value")
         properties = [PropertySpec.from_dict(item) for item in payload["properties"]]
         self.database.execute(
-            "INSERT INTO records_adapter_defaults (collection, noun, properties_json) VALUES (?, ?, ?) "
-            "ON CONFLICT(collection) DO UPDATE SET noun = excluded.noun, properties_json = excluded.properties_json",
+            "INSERT INTO record_collections (collection, noun, defaults_json) VALUES (?, ?, ?) "
+            "ON CONFLICT(collection) DO UPDATE SET noun = excluded.noun, defaults_json = excluded.defaults_json",
             (name, payload.get("noun") or "record", json.dumps([spec.to_dict() for spec in properties])))
         ensure_indexes(self.database, properties)
         self._sources.pop(name, None)
@@ -374,6 +401,55 @@ class DataEngine(Engine):
         self._file_written(source)
         self._changed(source.collection, "schema", schema=True)
         return {"field": spec}
+
+    def on_create_file(self, payload: dict, _job: Job) -> dict:
+        """A new, small file of a kind, so a template has something to show: a database with an "items" table, a
+        workbook with a header row, a dataset with x / y columns, a graph with a "Thing" node table."""
+        kind, name = payload["kind"], str(payload["name"]).strip() or "Untitled"
+        if kind not in LISTED_KINDS:
+            raise EngineError(f"Data makes {', '.join(LISTED_KINDS)} files, not “{kind}”", code="bad_request")
+        if kind == "dataset":
+            item = self.ask("knowledge.create_text", {"kind": "dataset", "name": name, "text": "x,y\n", "extension": ".csv"})["item"]
+            return {"item": item, "collection": file_collection("csv", item["item_id"])}
+        extension = {"database": ".sqlite3", "sheet": ".xlsx", "graph": ".kuzu"}[kind]
+        path = Path(self.ask("knowledge.new_path", {"kind": kind, "extension": extension})["path"])
+        table = {"database": "items", "sheet": "Sheet1", "graph": "Thing"}[kind]
+        if kind == "database":
+            import sqlite3
+            connection = sqlite3.connect(path)
+            connection.execute("CREATE TABLE items (name TEXT NOT NULL, notes TEXT)")
+            connection.commit()
+            connection.close()
+        elif kind == "sheet":
+            import openpyxl
+            book = openpyxl.Workbook()
+            book.active.title = table
+            book.active.append(["Name", "Value"])
+            book.save(path)
+        else:
+            from engines.toolkit.kuzu_db import GraphDb
+            db = GraphDb(path)
+            db.query("CREATE NODE TABLE Thing(name STRING, PRIMARY KEY(name))")
+            db.close()
+        unique = self.ask("knowledge.unique_name", {"kind": kind, "base": name})["name"]
+        item = self.ask("knowledge.register_path", {"kind": kind, "name": unique, "path": str(path)})["item"]
+        self.log("info", f"Created “{item['name']}” ({kind})")
+        return {"item": item, "collection": file_collection(LISTED_KINDS[kind], item["item_id"], table)}
+
+    def on_add_sheet(self, payload: dict, _job: Job) -> dict:
+        ref = self._file_ref(payload["collection"], ("sheet",), "Adding a sheet")
+        _item, path = self._item(ref.item_id)
+        name = str(payload["name"]).strip()[:31]
+        if path.suffix.lower() not in (".xlsx", ".xlsm") or not name:
+            raise EngineError("Sheets can be added to .xlsx workbooks, with a name", code="not_allowed")
+        import openpyxl
+        book = openpyxl.load_workbook(path)
+        if name in book.sheetnames:
+            raise EngineError(f"There is already a sheet “{name}”", code="invalid_value")
+        book.create_sheet(name)
+        book.save(path)
+        self.ask("knowledge.refresh_size", {"item_id": ref.item_id, "by": "data"})
+        return {"collection": file_collection("sheet", ref.item_id, name)}
 
     def on_set_cell(self, payload: dict, _job: Job) -> dict:
         self._file_ref(payload["collection"], ("sheet", "csv"), "Typing into cells")
