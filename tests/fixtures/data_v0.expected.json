@@ -1,0 +1,152 @@
+{
+ "generation": "data_v0",
+ "made_at": "2026-11-17",
+ "pages": [
+  {
+   "title": "Board",
+   "kind": "infinite_canvas",
+   "favorite": false
+  },
+  {
+   "title": "Comms and system",
+   "kind": "canvas",
+   "favorite": false
+  },
+  {
+   "title": "Data",
+   "kind": "canvas",
+   "favorite": false
+  },
+  {
+   "title": "Engineering",
+   "kind": "canvas",
+   "favorite": false
+  },
+  {
+   "title": "Fixture site",
+   "kind": "browser",
+   "favorite": false
+  },
+  {
+   "title": "Old notes",
+   "kind": "canvas",
+   "favorite": false
+  },
+  {
+   "title": "Planning",
+   "kind": "canvas",
+   "favorite": true
+  },
+  {
+   "title": "Project Editor",
+   "kind": "canvas",
+   "favorite": true
+  },
+  {
+   "title": "Tools",
+   "kind": "canvas",
+   "favorite": false
+  }
+ ],
+ "page_modules": {
+  "Project Editor": [
+   "rf_imaging"
+  ],
+  "Data": [
+   "db_editor",
+   "graph",
+   "graph_db",
+   "map",
+   "spreadsheet"
+  ],
+  "Planning": [
+   "agents",
+   "calendar",
+   "projects"
+  ],
+  "Engineering": [
+   "cad",
+   "tensor_inspector",
+   "wave_sim"
+  ],
+  "Tools": [
+   "library",
+   "notes",
+   "trading_chart"
+  ],
+  "Comms and system": [
+   "comms",
+   "monitor",
+   "web_app"
+  ]
+ },
+ "canvas_cards": {
+  "Board": [
+   "calendar",
+   "notes"
+  ]
+ },
+ "folders": [
+  "Archive"
+ ],
+ "records": {
+  "projects": [
+   "Old idea",
+   "Ship v1",
+   "Write docs"
+  ],
+  "agents": [
+   "Fixture helper",
+   "Reviewer"
+  ]
+ },
+ "chat": [
+  [
+   "user",
+   "Hello?"
+  ],
+  [
+   "assistant",
+   "Hi! How can I help?"
+  ]
+ ],
+ "library": [
+  {
+   "kind": "dataset",
+   "name": "Fixture dataset",
+   "sha256": "99de216b1354bcafff2e238d9e352d09ae1b79ab4cfc7d7c97fe17a398671507"
+  },
+  {
+   "kind": "note",
+   "name": "Fixture note",
+   "sha256": "ca27f41b6295262030dfe54d9c11ad27bdfb333a2338dee3c52384473a407cfc"
+  }
+ ],
+ "user_database": {
+  "name": "Fixture inventory",
+  "rows": [
+   [
+    "bolt",
+    40
+   ],
+   [
+    "nut",
+    55
+   ],
+   [
+    "washer",
+    12
+   ]
+  ]
+ },
+ "places": [
+  "Workshop"
+ ],
+ "mail_accounts": [
+  "Fixture mail"
+ ],
+ "preference": [
+  "fixture.marker",
+  "data_v0"
+ ]
+}

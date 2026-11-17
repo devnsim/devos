@@ -23,6 +23,7 @@
 #              close_card(), bring_to_front(), zoom_to(), fit(), cells, cards, to_layout(), load_saved_layout(),
 #              save(); ModuleCard; GRID_PX
 # NOTES:
+#   - [2026-11-17] Has a channel_hub (app.views.channels): views on this page share their selection.
 #   - [2026-11-17] Created (Canvas page kind). Cards are real widgets laid out over a painted grid, not a
 #                  QGraphicsScene: web views and OpenGL views don't render inside graphics proxies. Zoom
 #                  scales the card rectangles; the modules re-lay themselves out at that size.
@@ -79,6 +80,7 @@ from app.ui.pages.canvas_page import PageTitleEdit
 from app.ui.theme import EDGE_COLOR, MUTED_TEXT_COLOR, SCROLLBAR_HOVER_COLOR
 from app.ui.ui_tools import set_style_property, tool_button
 from app.ui.window_events import mouse_hub
+from app.views.channels import ChannelHub
 
 GRID_PX = 20
 # --- END [1.1] ---
@@ -616,6 +618,7 @@ class InfiniteCanvasPage(QWidget):
     def __init__(self, page_id: int, title: str, database: Database) -> None:
         super().__init__(objectName="infinite_canvas_page_panel")
         self.page_id = page_id
+        self.channel_hub = ChannelHub(self)           # page-wide channels: every view on this page links here
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)

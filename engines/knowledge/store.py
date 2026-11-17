@@ -1,23 +1,25 @@
 # ==============================================================================
-# FILE: app/data/store/content.py
-# OVERVIEW: The user's content library: notes, datasets, captures, CAD models and other files DevOS
-#           keeps for the user, stored and organised by the app (never "save to some folder").
+# FILE: engines/knowledge/store.py
+# OVERVIEW: The Library store - inside the Knowledge engine, the only code that touches <data>/library/ and
+#           the content_items index: notes, datasets, captures, CAD models and other files DevOS keeps for you.
 # PURPOSE:
-#   1. Files live in <data folder>/library/<kind>/<random name><ext>; the content_items table holds
-#      their names, kinds, sizes and metadata.
-#   2. Add (copy in a file, bytes or text), read / write text, rename, delete, list by kind.
-#   3. add_listener(): open tools (notes, graph, library) refresh when items change.
-#   4. unique_name() for "Untitled note 2"-style naming.
+#   1. Files live in <data folder>/library/<kind>/<random name><ext>; content_items holds their names, kinds,
+#      sizes and metadata.
+#   2. Add (copy in a file, bytes or text), read / write text, rename, delete, export, list by kind; every
+#      change is reported to the engine (on_change), which announces it on the bus.
+#   3. unique_name() for "Untitled note 2"-style naming.
 # CONTRACT:
-#   - Requires: app.data.store.database (Database, data_directory), app.data.activity_log
-#   - Exposes: ContentStore(database) (+ add_listener, refresh_size), get_content_store(), ContentItem, CONTENT_KINDS,
-#              EXTENSION_KINDS, kind_for_path(), size_text()
+#   - Requires: app.data.store.database (Database, data_directory), app.data.activity_log, app.data.content_kinds.
+#               Used ONLY by engines/knowledge (checked by tools/check_standard.py).
+#   - Exposes: ContentStore(database, on_change=None), ContentItem
 # NOTES:
+#   - [2026-11-17] Moved here from app/data/store/content.py (engine plan Phase 4): the Knowledge engine owns the
+#                  Library. Kinds and size_text() moved to app/data/content_kinds.py; get_content_store() and
+#                  listeners are gone (changes become "knowledge.changed" events); write_text() reports changes too.
 #   - [2026-11-16] Content kinds graph (Kùzu graph databases), sheet (spreadsheets), geo (map layers) and
 #                  image (captures, downloads) with their extensions.
-#   - [2026-11-16] New kind "database" (user SQLite databases, Database Editor). EXTENSION_KINDS / kind_for_path()
-#                  moved here from the Library tool so imports and browser downloads share one mapping.
-#                  refresh_size() for files edited in place (databases).
+#   - [2026-11-16] New kind "database" (user SQLite databases, Database Editor). refresh_size() for files edited
+#                  in place (databases).
 #   - [2026-11-15] Created so modules stop asking users where to save things (RF captures used to land in
 #                  the repo root). Files on disk get random names; the user only ever sees item names.
 #                  Every add / rename / delete is announced in the activity log.
@@ -26,7 +28,7 @@
 # ==============================================================================
 # [DEFINITIONS]
 # - content item: One user file managed by DevOS (ContentItem).
-# - kind (str): Category in CONTENT_KINDS ("note", "dataset", "capture", "cad", "database", "file").
+# - kind (str): Category in app.data.content_kinds.CONTENT_KINDS.
 # - library folder: <data folder>/library, see app.data.store.database.data_directory().
 # ==============================================================================
 
@@ -39,7 +41,6 @@
 #    2.1 init
 #    2.2 queries
 #    2.3 add_and_edit
-#    2.4 shared_instance
 # ==============================================================================
 
 # ==============================================================================
@@ -55,31 +56,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.data.activity_log import get_activity_log
-from app.data.store.database import Database, data_directory, get_database
+from app.data.content_kinds import CONTENT_KINDS, size_text
+from app.data.store.database import Database, data_directory
 
 NAMESPACE = "content"
-CONTENT_KINDS = {               # kind: (display name, default extension)
-    "note": ("Notes", ".md"),
-    "dataset": ("Datasets", ".csv"),
-    "capture": ("RF captures", ".npz"),
-    "cad": ("CAD models", ".stl"),
-    "database": ("Databases", ".sqlite3"),
-    "graph": ("Graph databases", ".kuzu"),
-    "sheet": ("Spreadsheets", ".xlsx"),
-    "geo": ("Map layers", ".geojson"),
-    "image": ("Images", ".png"),
-    "file": ("Other files", ""),
-}
-EXTENSION_KINDS = {".md": "note", ".markdown": "note", ".txt": "note", ".csv": "dataset", ".npz": "capture",
-                   ".stl": "cad", ".obj": "cad", ".ply": "cad", ".off": "cad", ".glb": "cad", ".gltf": "cad",
-                   ".sqlite": "database", ".sqlite3": "database", ".db": "database", ".kuzu": "graph",
-                   ".xlsx": "sheet", ".xlsm": "sheet", ".ods": "sheet", ".xls": "sheet", ".geojson": "geo",
-                   ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image", ".svg": "image"}
-
-
-def kind_for_path(path: str | Path) -> str:
-    """Content kind for a file name by its extension ("file" if unknown)."""
-    return EXTENSION_KINDS.get(Path(path).suffix.lower(), "file")
 MIGRATIONS = [
     """
     CREATE TABLE content_items (
@@ -117,29 +97,19 @@ class ContentItem:
 # [2.1] init
 # ==============================================================================
 class ContentStore:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, on_change=None) -> None:
         self.database = database
         database.migrate(NAMESPACE, MIGRATIONS)
         self.root = data_directory() / "library"
         for kind in CONTENT_KINDS:
             (self.root / kind).mkdir(parents=True, exist_ok=True)
         self.log = get_activity_log()
-        self._listeners: list = []
+        self.on_change = on_change
 
-    def add_listener(self, listener) -> None:
-        """listener(kind) is called after an item of that kind is added, renamed or deleted."""
-        self._listeners.append(listener)
-
-    def remove_listener(self, listener) -> None:
-        if listener in self._listeners:
-            self._listeners.remove(listener)
-
-    def _changed(self, kind: str) -> None:
-        for listener in list(self._listeners):
-            try:
-                listener(kind)
-            except RuntimeError:                       # listener's widget already deleted
-                self.remove_listener(listener)
+    def _changed(self, kind: str, item_id: int | None = None, content: bool = False) -> None:
+        """Report a change (on_change(kind, ids, content)): the engine turns it into a "changed" event."""
+        if self.on_change is not None:
+            self.on_change(kind, [item_id] if item_id is not None else None, content)
 # --- END [2.1] ---
 
 # ==============================================================================
@@ -188,7 +158,7 @@ class ContentStore:
         )
         self.log.success("library", f"Saved {CONTENT_KINDS.get(kind, (kind,))[0].lower()[:-1]} “{name}” "
                                     f"({size_text(file_path.stat().st_size)})")
-        self._changed(kind)
+        self._changed(kind, cursor.lastrowid)
         return self.get(cursor.lastrowid)
 
     def _new_file_path(self, kind: str, extension: str) -> Path:
@@ -227,6 +197,7 @@ class ContentStore:
         path.write_text(text, encoding="utf-8")
         self.database.execute("UPDATE content_items SET size_bytes = ?, updated_at = ? WHERE item_id = ?",
                               (path.stat().st_size, time.time(), item_id))
+        self._changed(self.get(item_id).kind, item_id, content=True)
 
     def refresh_size(self, item_id: int) -> None:
         """Re-read the size of a file that was changed in place (e.g. a database being edited)."""
@@ -242,7 +213,7 @@ class ContentStore:
             self.database.execute("UPDATE content_items SET name = ?, updated_at = ? WHERE item_id = ?",
                                   (name, time.time(), item_id))
             self.log.info("library", f"Renamed “{item.name}” → “{name}”")
-            self._changed(item.kind)
+            self._changed(item.kind, item_id)
         return name
 
     def delete(self, item_id: int) -> None:
@@ -252,7 +223,7 @@ class ContentStore:
         self.path(item).unlink(missing_ok=True)
         self.database.execute("DELETE FROM content_items WHERE item_id = ?", (item_id,))
         self.log.info("library", f"Deleted “{item.name}”")
-        self._changed(item.kind)
+        self._changed(item.kind, item_id)
 
     def export(self, item_id: int, destination: str | Path) -> Path:
         """Copy an item out of the library (when the user explicitly wants a file elsewhere)."""
@@ -261,23 +232,3 @@ class ContentStore:
         self.log.info("library", f"Exported “{self.get(item_id).name}” to {destination}")
         return destination
 # --- END [2.3] ---
-
-# ==============================================================================
-# [2.4] shared_instance
-# ==============================================================================
-_content_store: ContentStore | None = None
-
-
-def get_content_store() -> ContentStore:
-    global _content_store
-    if _content_store is None:
-        _content_store = ContentStore(get_database())
-    return _content_store
-
-
-def size_text(size_bytes: int) -> str:
-    for unit, size in (("GB", 2**30), ("MB", 2**20), ("KB", 2**10)):
-        if size_bytes >= size:
-            return f"{size_bytes / size:.1f} {unit}"
-    return f"{size_bytes} B"
-# --- END [2.4] ---

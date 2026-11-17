@@ -12,6 +12,7 @@
 #               keyword argument context: ModuleContext | None
 #   - Exposes: ModuleSpec, ModuleContext, MODULE_LIBRARY, MODULE_BY_ID, create_module()
 # NOTES:
+#   - [2026-11-17] Data view module (engine plan Phase 2): a ViewHost as a page tile or a Canvas card.
 #   - [2026-11-16] Added Spreadsheet, Graph Database (Kùzu), Map (GIS), Projects, Agents, CAD · Part Design,
 #                  Comms, Software Monitor and Web App.
 #   - [2026-11-16] Added the Database Editor (db_editor) under Data.
@@ -127,6 +128,9 @@ MODULE_LIBRARY: tuple[ModuleSpec, ...] = (
     ModuleSpec("map", "Map (GIS)", "Data",
                "Slippy map with base layers, your places and GeoJSON layers from the library.",
                "app.modules.map.view:MapModule"),
+    ModuleSpec("data_view", "Data view", "Data",
+               "Any data as a table, board, timeline, calendar or form: choose the data, its fields and a filter.",
+               "app.modules.data_view.view:DataViewModule"),
     ModuleSpec("calendar", "Calendar", "Planning", "Month calendar; remembers the selected day.",
                "app.modules.calendar.view:CalendarModule"),
     ModuleSpec("projects", "Projects", "Planning",

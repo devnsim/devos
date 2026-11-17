@@ -1,161 +1,102 @@
 # ==============================================================================
 # FILE: app/modules/library/view.py
-# OVERVIEW: Library tool: browse and organise everything DevOS keeps for the user (notes, datasets, RF
-#           captures, CAD models, files) - rename, delete, import, export, preview.
+# OVERVIEW: Library - everything DevOS keeps for you (notes, datasets, captures, CAD models, databases …) as
+#           views over the Knowledge engine: a table of every item and the document view (text or details).
 # PURPOSE:
-#   1. Table of content items (name, type, size, modified), filterable by type; rename by double-click.
-#   2. Preview: Markdown for notes, first rows for datasets, details for everything else.
-#   3. Import (copies a file in, type picked from its extension), Export (copy out on purpose), Delete.
+#   1. A SourceModule on Knowledge's "library" table: sort, search (names and note text), rename in place,
+#      delete / duplicate from the record menu, filter by kind (view menu → Filter), New view… for more.
+#   2. Import… copies files in (kind from the extension); Export… copies the selected item out on purpose.
+#   Phase 5 turns this composition into the Library template.
 # CONTRACT:
-#   - Requires: app.modules.base.ModuleView, app.data.store.content (get_content_store, CONTENT_KINDS),
-#               app.ui.canvas.tile_canvas, QSS selector #library_panel
-#   - Exposes: LibraryModule(parent=None, context=None); refresh()
+#   - Requires: app.modules.source_module.SourceModule, app.clients.library (add_file, export, get),
+#               app.data.content_kinds.kind_for_path, app.views (api, types), PySide6 (file dialogs)
+#   - Exposes: LibraryModule(parent=None, context=None) with import_files(paths), export_selected(destination)
 # NOTES:
+#   - [2026-11-17] Import reports every file it couldn't import in its summary line (they were overwritten).
+#   - [2026-11-17] Rebuilt in Phase 4 of the engine plan: views over the Knowledge engine (the hand-made table,
+#                  preview and content-store calls are gone).
 #   - [2026-11-15] Created with the content library (user files live in DevOS, not in random folders).
-#   - [2026-11-16] Import uses content.kind_for_path() (EXTENSION_KINDS moved to content.py, shared with
-#                  browser downloads); file-size text reuses content.size_text().
 # ==============================================================================
 
 # ==============================================================================
 # [DEFINITIONS]
-# - ALL_KINDS (str): Filter entry that shows every kind.
+# None - see app/modules/source_module.py.
 # ==============================================================================
 
 # ==============================================================================
 # [INDEX]
-# 1. IMPORTS
-#    1.1 imports
-# 2. LIBRARY_MODULE
-#    2.1 init
-#    2.2 table
-#    2.3 actions
+# 1. LIBRARY
+#    1.1 library_module
 # ==============================================================================
 
 # ==============================================================================
-# [1.1] imports
+# [1.1] library_module
 # ==============================================================================
-import time
+from __future__ import annotations
+
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QMessageBox, QPushButton, QSplitter, QTextBrowser, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QPushButton
 
-from app.data.store.content import CONTENT_KINDS, get_content_store, kind_for_path, size_text
-from app.modules.base import ModuleView
-from app.ui.canvas.tile_canvas import reserve_controls_space
-
-ALL_KINDS = "All types"
-# --- END [1.1] ---
+from app.clients.library import LibraryError, library
+from app.data.content_kinds import kind_for_path
+from app.modules.source_module import SourceModule
+from app.views.api import make_definition
+from app.views.types import BUILT_IN, LIBRARY_VIEWS
 
 
-# ==============================================================================
-# [2.1] init
-# ==============================================================================
-class LibraryModule(ModuleView):
-    def __init__(self, parent: QWidget | None = None, context=None) -> None:
-        super().__init__(parent, context, "library_panel")
-        self.store = get_content_store()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        row = QHBoxLayout()
-        self.kind_combo = QComboBox()
-        self.kind_combo.addItem(ALL_KINDS, None)
-        for kind, (title, _extension) in CONTENT_KINDS.items():
-            self.kind_combo.addItem(title, kind)
-        self.kind_combo.currentIndexChanged.connect(self.refresh)
-        buttons = [("Import…", self._on_import), ("Export…", self._on_export), ("Delete", self._on_delete)]
-        row.addWidget(self.kind_combo, 1)
-        for text, handler in buttons:
-            button = QPushButton(text)
+class LibraryModule(SourceModule):
+    SOURCE = {"engine": "knowledge", "collection": "library"}
+    NOUN = "file"
+    VIEWS = ("table", "document") + tuple(view for view in BUILT_IN + LIBRARY_VIEWS if view not in ("table", "document"))
+    DEFAULT_LAYOUT = {"split": "h", "sizes": [3, 2], "children": [{"kind": "table"}, {"kind": "document"}]}
+
+    def block_definition(self, type_id: str) -> dict:
+        if type_id == "table":
+            return make_definition("table", self.source, {"sort": [{"field": "updated", "descending": True}]})
+        if type_id == "board":
+            return make_definition("board", self.source, mapping={"group": "kind"})
+        return make_definition(type_id, self.source)
+
+    def toolbar_start(self, row: QHBoxLayout) -> None:
+        for text, handler, tip in (("Import…", self._choose_imports, "Copy files into your Library"),
+                                   ("Export…", self._choose_export, "Copy the selected item to a folder of your choice")):
+            button = QPushButton(text, toolTip=tip)
             button.clicked.connect(handler)
             row.addWidget(button)
-        reserve_controls_space(row)
-        layout.addLayout(row)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal, objectName="pane_splitter")
-        self.table = QTreeWidget()
-        self.table.setHeaderLabels(["Name", "Type", "Size", "Modified"])
-        self.table.setRootIsDecorated(False)
-        self.table.setSortingEnabled(True)
-        self.table.itemChanged.connect(self._on_renamed)
-        self.table.currentItemChanged.connect(self._preview)
-        self.preview = QTextBrowser()
-        splitter.addWidget(self.table)
-        splitter.addWidget(self.preview)
-        splitter.setSizes([3, 2])
-        layout.addWidget(splitter, 1)
-        self.store.add_listener(lambda kind: self.refresh())
-        self.refresh()
-# --- END [2.1] ---
-
-# ==============================================================================
-# [2.2] table
-# ==============================================================================
-    def refresh(self) -> None:
-        self.table.blockSignals(True)
-        self.table.clear()
-        for item in self.store.items(self.kind_combo.currentData()):
-            row = QTreeWidgetItem([item.name, CONTENT_KINDS.get(item.kind, (item.kind,))[0], size_text(item.size_bytes),
-                                   time.strftime("%Y-%m-%d %H:%M", time.localtime(item.updated_at))])
-            row.setData(0, Qt.ItemDataRole.UserRole, item.item_id)
-            row.setFlags(row.flags() | Qt.ItemFlag.ItemIsEditable)
-            self.table.addTopLevelItem(row)
-        for column in range(4):
-            self.table.resizeColumnToContents(column)
-        self.table.blockSignals(False)
-
-    def _selected_id(self) -> int | None:
-        row = self.table.currentItem()
-        return row.data(0, Qt.ItemDataRole.UserRole) if row else None
-
-    def _preview(self) -> None:
-        item_id = self._selected_id()
-        item = self.store.get(item_id) if item_id is not None else None
-        if item is None:
-            self.preview.clear()
-            return
-        if item.kind == "note":
-            self.preview.setMarkdown(self.store.read_text(item_id))
-        elif item.kind == "dataset":
-            lines = self.store.read_text(item_id).splitlines()
-            self.preview.setPlainText("\n".join(lines[:40]) + (f"\n… {len(lines) - 40:,} more rows" if len(lines) > 40 else ""))
-        else:
-            details = "\n".join(f"{key}: {value}" for key, value in item.metadata.items())
-            self.preview.setPlainText(f"{item.name}\n{CONTENT_KINDS.get(item.kind, (item.kind,))[0]} · "
-                                      f"{size_text(item.size_bytes)}\n\n{details}")
-
-    def _on_renamed(self, row: QTreeWidgetItem, column: int) -> None:
-        if column == 0:
-            self.store.rename(row.data(0, Qt.ItemDataRole.UserRole), row.text(0))
-# --- END [2.2] ---
-
-# ==============================================================================
-# [2.3] actions
-# ==============================================================================
-    def _on_import(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Import into your library")
+    def import_files(self, paths: list[str]) -> int:
+        added, failures = 0, []
         for path in paths:
-            self.store.add_file(kind_for_path(path), path)
+            try:
+                library().add_file(kind_for_path(path), path)
+                added += 1
+            except LibraryError as error:
+                failures.append(f"{Path(path).name}: {error}")
+        text = f"Imported {added} file{'s' if added != 1 else ''}"
+        if failures:                                   # one line that keeps the failures visible
+            text += f"; {len(failures)} not imported ({'; '.join(failures)})"
+        self.report(text, is_error=bool(failures))
+        return added
 
-    def _on_export(self) -> None:
-        item_id = self._selected_id()
-        if item_id is None:
+    def export_selected(self, destination: str) -> None:
+        try:
+            path = library().export(self.focus.selected_id, destination)
+            self.report(f"Exported to {path}")
+        except LibraryError as error:
+            self.report(str(error), is_error=True)
+
+    def _choose_imports(self) -> None:
+        paths, _filter = QFileDialog.getOpenFileNames(self, "Import into your Library")
+        if paths:
+            self.import_files(paths)
+
+    def _choose_export(self) -> None:
+        item = library().get(self.focus.selected_id) if self.focus.selected_id is not None else None
+        if item is None:
+            self.report("Select an item first", is_error=True)
             return
-        item = self.store.get(item_id)
-        extension = Path(item.file_name).suffix
-        destination, _ = QFileDialog.getSaveFileName(self, "Export a copy", f"{item.name}{extension}")
+        destination, _filter = QFileDialog.getSaveFileName(self, "Export", item.name + item.extension)
         if destination:
-            self.store.export(item_id, destination)
-
-    def _on_delete(self) -> None:
-        item_id = self._selected_id()
-        if item_id is None:
-            return
-        name = self.store.get(item_id).name
-        if QMessageBox.question(self, "Delete", f"Delete “{name}” from your library?") == QMessageBox.StandardButton.Yes:
-            self.store.delete(item_id)
-
-# --- END [2.3] ---
+            self.export_selected(destination)
+# --- END [1.1] ---

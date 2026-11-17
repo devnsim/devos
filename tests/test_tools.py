@@ -10,6 +10,7 @@
 #   - Requires: tests/conftest.py fixtures (qapp, database, pump), app.data, app.modules, app.ui
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Library and Notes tests use library() and the Notes module's document view (Phase 4).
 #   - [2026-11-16] New pages start with the Create New panel (no automatic module tile).
 #   - [2026-11-15] Created with the System Log, content library and tools.
 # ==============================================================================
@@ -52,8 +53,8 @@ def test_activity_log_steps_and_persistence(database):
 # [1.2] content_and_preferences
 # ==============================================================================
 def test_content_library_and_preferences(database, tmp_path):
-    from app.data.store.content import get_content_store
-    store = get_content_store()
+    from app.clients.library import library
+    store = library()
     note = store.create_text("note", store.unique_name("note", "Test note"), "# hi")
     assert store.read_text(note.item_id) == "# hi"
     store.write_text(note.item_id, "# changed")
@@ -98,11 +99,18 @@ def test_graph_with_mock_data(qapp, database, pump):
 
 
 def test_notes_autosave(qapp, database, pump, wait_for):
-    from app.data.store.content import get_content_store
+    from app.clients.library import library
     from app.modules.registry import create_module
     notes, _ = create_module("notes", database)
-    notes.note_editor.setPlainText("# Saved by the test")
-    assert wait_for(lambda: "Saved by the test" in get_content_store().read_text(notes.note_id))
+    notes.resize(1000, 600)
+    notes.show()
+    notes.new_note()
+    document = notes.block_canvas.blocks("document")[0].view
+    assert wait_for(lambda: notes.note_id is not None and document.shown_id == notes.note_id
+                    and document.note_editor.toPlainText().startswith("# "), 5)
+    document.note_editor.setPlainText("# Saved by the test")
+    assert wait_for(lambda: "Saved by the test" in library().read_text(notes.note_id), 5)
+    notes.deleteLater()
 
 
 def test_financial_chart_settings(qapp, database, pump):

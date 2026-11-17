@@ -11,6 +11,7 @@
 #               manifold3d, openpyxl (shell.nix)
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Record views test goes through the records engine and ViewHosts (Phase 2).
 #   - [2026-11-16] Created with the records model, toolbars and nine new modules.
 # ==============================================================================
 
@@ -173,26 +174,26 @@ def test_cad_part_build():
 # ==============================================================================
 # [2.1] record_views
 # ==============================================================================
-def test_record_views_stay_in_sync(qapp, database, pump):
+def test_record_views_stay_in_sync(qapp, database, pump, wait_for):
     from app.modules.projects.view import ProjectsModule
     module = ProjectsModule()
     module.resize(1200, 700)
     module.show()
     pump()
-    record = module.controller.new_record({"status": "Planned", "start": "2026-03-01", "due": "2026-03-10"}, title="Ship")
-    pump()
-    board = module.block_canvas.blocks("board")[0]
-    board.move_card(record.record_id, "Active", None)
-    pump()
-    assert module.collection.get(record.record_id).values["status"] == "Active"
-    timeline = module.block_canvas.blocks("timeline")[0]
-    assert any(row[0].record_id == record.record_id for row in timeline.canvas.rows)
-    timeline.commit_dates(record.record_id, dt.date(2026, 3, 2), dt.date(2026, 3, 12))
-    pump()
-    assert module.collection.get(record.record_id).values["due"] == "2026-03-12"
-    form = module.block_canvas.blocks("form")[0]
-    assert form.shown_id == record.record_id and form.title_edit.text() == "Ship"
-    assert not module.controller.set_value(record.record_id, "progress", "lots")   # rejected, reported
+    module.create_record({"status": "Planned", "start": "2026-03-01", "due": "2026-03-10"}, title="Sync ship")
+    board, timeline, form = (module.block_canvas.blocks(kind)[0] for kind in ("board", "timeline", "form"))
+    find = lambda host: next((row for row in (host.data.rows if host.data else []) if row["title"] == "Sync ship"), None)   # noqa: E731
+    assert wait_for(lambda: find(board) is not None, 5)
+    record_id = find(board)["id"]
+    board.view.move_card(record_id, "Active", None)                    # every view follows the engine's change
+    assert wait_for(lambda: find(timeline) and find(timeline)["status"] == "Active", 5)
+    timeline.view.commit_dates(record_id, dt.date(2026, 3, 2), dt.date(2026, 3, 12))
+    assert wait_for(lambda: find(form) and find(form)["due"] == "2026-03-12", 5)
+    assert wait_for(lambda: form.view.shown_id == record_id and form.view.title_edit.text() == "Sync ship", 5)
+    statuses = []
+    form.status.connect(lambda text, is_error: statuses.append((text, is_error)))
+    form.set_value(record_id, "progress", "lots")                     # rejected by the engine, reported
+    assert wait_for(lambda: statuses and statuses[-1][1] and "not a number" in statuses[-1][0], 5)
     module.deleteLater()
 
 

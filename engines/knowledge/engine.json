@@ -1,0 +1,9 @@
+{
+  "id": "knowledge",
+  "title": "Knowledge",
+  "version": "0.2",
+  "summary": "Your files and documents: the Library (notes, datasets, captures, databases …).",
+  "entry": "engine:KnowledgeEngine",
+  "kernel_api": 1,
+  "core": true
+}

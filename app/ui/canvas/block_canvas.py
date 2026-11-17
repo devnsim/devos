@@ -14,10 +14,12 @@
 #   - Requires: app.ui.canvas.tile_canvas, app.ui.ui_tools, QSS selectors #block_canvas_panel,
 #               #block_tile_panel
 #   - Exposes: BlockSpec, BlockTile, reserve_controls_space(row_layout), BlockCanvas(specs, save_layout=None, saved_layout=None,
-#              default_layout=None); blocks(kind=None) -> content widgets; show_block(kind) -> content widget;
+#              default_layout=None, spec_factory=None) with spec(kind); blocks(kind=None) -> content widgets; show_block(kind) -> content widget;
 #              plus TileCanvas API.
 #              Block content widgets may implement block_state() -> dict and restore_block_state(dict).
 # NOTES:
+#   - [2026-11-17] spec_factory: blocks of kinds the module didn't list (views from New view…, engine views).
+#   - [2026-11-17] Blocks with a state_changed signal (ViewHost) save the layout when it fires.
 #   - [2026-11-17] show_block(kind): bring a view forward or open it beside the active block (open a record's form).
 #   - [2026-11-15] The fading corner controls moved to tile_canvas.CornerControlsTile (module tiles use
 #                  them too); BlockTile is now a thin subclass. reserve_controls_space is re-exported.
@@ -99,17 +101,28 @@ class BlockCanvas(TileCanvas):
     tile_class = BlockTile
 
     def __init__(self, specs: list[BlockSpec], save_layout: Callable[[dict], None] | None = None,
-                 saved_layout: dict | None = None, default_layout: dict | None = None, parent: QWidget | None = None) -> None:
+                 saved_layout: dict | None = None, default_layout: dict | None = None, parent: QWidget | None = None,
+                 spec_factory: Callable[[str], BlockSpec | None] | None = None) -> None:
         super().__init__([(spec.kind, spec.title, spec.description) for spec in specs], "block_canvas_panel", parent)
         self.specs = {spec.kind: spec for spec in specs}
+        self.spec_factory = spec_factory
         self._save_layout = save_layout
         if not self.restore_layout(saved_layout) and not self.restore_layout(default_layout):
             self.add_tile(specs[0].kind if specs else None)
         if save_layout is not None:
             self.layout_changed.connect(lambda: self._save_layout(self.to_layout()))
 
+    def spec(self, kind: str) -> BlockSpec:
+        """The block kind's spec; kinds the module didn't list (a view made with New view…, a saved view whose
+        engine is gone) come from spec_factory when there is one."""
+        if kind not in self.specs and self.spec_factory is not None:
+            made = self.spec_factory(kind)
+            if made is not None:
+                self.specs[kind] = made
+        return self.specs[kind]
+
     def create_content(self, kind: str, instance_id: str | None, state: dict | None):
-        spec = self.specs[kind]
+        spec = self.spec(kind)
         widget = spec.factory()
         restore = getattr(widget, "restore_block_state", None)
         if state and callable(restore):
@@ -120,6 +133,8 @@ class BlockCanvas(TileCanvas):
         super()._fill_tile(tile, kind, instance_id, state)
         if callable(getattr(tile.content_widget, "block_state", None)):
             self._watch_state_controls(tile.content_widget)
+        if hasattr(tile.content_widget, "state_changed"):           # e.g. a ViewHost's definition changed
+            tile.content_widget.state_changed.connect(lambda: None if self._is_restoring else self._change_timer.start())
 
     def _watch_state_controls(self, widget: QWidget) -> None:
         """A block's own controls (combos, sliders, toggles, fields) changing = its state changed: save.

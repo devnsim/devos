@@ -10,11 +10,12 @@
 #      (pad / pocket / hole), numeric shape editing, measurements and mass, saving the part (JSON) and STL
 #      into the library.
 # CONTRACT:
-#   - Requires: app.modules.cad (engine, mesh_view), app.data.store.content, app.data.activity_log, app.ui.theme,
+#   - Requires: app.modules.cad (engine, mesh_view), app.clients.library, app.data.activity_log, app.ui.theme,
 #               app.ui.widgets.step_bar.StepProgressBar, QSS selectors #part_design_window, #create_new_label
 #   - Exposes: PartDesignWindow(part, item_id=None, parent=None) with signal saved(int item_id); SketchCanvas;
 #              STEPS
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-17] The 1-4 step list on the left became a progress bar across the top (StepProgressBar): name,
 #                  steps and Back / Next in one row, the hint under it, the work area full width.
 #   - [2026-11-16] Created (CAD part design workflow in its own window).
@@ -58,7 +59,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.cad.engine import MATERIAL_DENSITIES, PART_FORMAT, CadError, Feature, Part, Shape, Sketch, measure
 from app.modules.cad.mesh_view import MeshViewer
 from app.ui.theme import (
@@ -765,7 +766,7 @@ class PartDesignWindow(QWidget):
         return page
 
     def save_part(self) -> int:
-        store = get_content_store()
+        store = library()
         with self.log.step("cad", f"Save part “{self.part.name}”"):
             if self.item_id is not None and store.get(self.item_id) is not None:
                 store.path(self.item_id).write_text(self.part.to_json(), encoding="utf-8")
@@ -787,7 +788,7 @@ class PartDesignWindow(QWidget):
         if solid is None:
             return
         with self.log.step("cad", f"Export STL of “{self.part.name}”"):
-            item = get_content_store().add_bytes("cad", f"{self.part.name} (STL)", solid.export(file_type="stl"), ".stl")
+            item = library().add_bytes("cad", f"{self.part.name} (STL)", solid.export(file_type="stl"), ".stl")
         self.export_label.setText(f"Saved “{item.name}” in your Library")
 
     def export_file(self) -> None:

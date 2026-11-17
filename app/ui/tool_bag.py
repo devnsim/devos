@@ -12,13 +12,16 @@
 #   5. The global tools: calculator, quick note, capture, timestamp, colour picker, web search, new
 #      browser tab, System Log.
 # CONTRACT:
-#   - Requires: app.data (activity_log, store.content), app.ui.window_events (via note_pressed caller),
+#   - Requires: app.data.activity_log, app.clients.library, app.ui.window_events (via note_pressed caller),
 #               app.ui.web_support (address_to_url), QSS selectors #tool_bag_popup, #tool_bag_list,
 #               #tool_bag_search_edit
 #   - Exposes: ToolSpec, register_tools(specs), get_tool(tool_id), tools_for(module_type_id),
 #              search_tools(text, module_type_id), run_tool(spec, module_view), ToolBagPopup,
 #              note_pressed(widget), active_module(), module_type_of(widget), main_window()
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
+#   - [2026-11-17] Global tool "Bus inspector" (engine plan Phase 3).
+#   - [2026-11-17] Global tool "Back up data" (app.data.store.backup, off the UI thread).
 #   - [2026-11-16] Created with module toolbars (global tool bag + module-dependent tools).
 # ==============================================================================
 
@@ -259,15 +262,15 @@ def _calculator(_module_view) -> None:
 
 
 def _quick_note(_module_view) -> None:
-    from app.data.store.content import get_content_store
+    from app.clients.library import library
     text, is_ok = QInputDialog.getMultiLineText(main_window(), "Quick note", "Saved to your Library (Notes):")
     if is_ok and text.strip():
-        item = get_content_store().create_text("note", f"Quick note {dt.datetime.now():%Y-%m-%d %H:%M}", text)
+        item = library().create_text("note", f"Quick note {dt.datetime.now():%Y-%m-%d %H:%M}", text)
         get_activity_log().success("tools", f"Saved quick note “{item.name}”")
 
 
 def _capture(module_view) -> None:
-    from app.data.store.content import get_content_store
+    from app.clients.library import library
     target = module_view or main_window()
     if target is None:
         return
@@ -276,7 +279,7 @@ def _capture(module_view) -> None:
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     target.grab().save(buffer, "PNG")
     name = f"Capture {dt.datetime.now():%Y-%m-%d %H.%M.%S}"
-    item = get_content_store().add_bytes("image", name, bytes(data), ".png")
+    item = library().add_bytes("image", name, bytes(data), ".png")
     get_activity_log().success("tools", f"Captured “{item.name}” into your Library (Images)")
 
 
@@ -301,6 +304,20 @@ def _new_browser(_module_view) -> None:
         window.open_browser_tab()
 
 
+def _back_up(_module_view) -> None:
+    """Back up the data folder off the UI thread; the outcome is announced in the System Log."""
+    from app.data.store.backup import create_backup
+    from app.ui.ui_tools import run_in_thread
+    window = main_window()
+    if window is not None:
+        run_in_thread(window, lambda: create_backup(), lambda _info, _error: None)
+
+
+def _bus_inspector(_module_view) -> None:
+    from app.ui.bus_inspector import open_bus_inspector
+    open_bus_inspector(main_window())
+
+
 def _toggle_log(_module_view) -> None:
     window = main_window()
     if window is not None:
@@ -320,6 +337,10 @@ register_tools([
     ToolSpec("web_search", "Web search", "🔎", "Search the web or open an address in a new browser page", _web_search,
              keywords="browser internet google"),
     ToolSpec("new_browser", "New browser tab", "🌐", "Open a new browser page", _new_browser, keywords="web internet"),
+    ToolSpec("back_up", "Back up data", "⛁", "Copy the whole data folder into a new backup (Settings → Data)", _back_up,
+             keywords="backup save copy restore"),
+    ToolSpec("bus_inspector", "Bus inspector", "⇄", "Engines at work: requests, latency, queues and live messages",
+             _bus_inspector, keywords="engines debug messages"),
     ToolSpec("system_log", "System Log", "≣", "Show or hide the System Log", _toggle_log, keywords="activity errors"),
 ])
 # --- END [3.1] ---

@@ -12,13 +12,14 @@
 #      / drop table, add / rename / drop column, add index, show_block(kind).
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.modules.db_editor (engine, blocks, dialogs),
-#               app.data.store.content, app.data.activity_log, app.ui (ui_tools, canvas.tile_canvas),
+#               app.clients.library, app.data.activity_log, app.ui (ui_tools, canvas.tile_canvas),
 #               QSS selectors #db_editor_panel, #db_status_label
 #   - Exposes: DbEditorModule(parent=None, context=None); signals databases_changed, database_changed,
 #              table_changed, query_changed, row_selected, schema_changed, data_changed(str);
 #              open_database(item_id); select_table(name); set_query(); select_row_at(offset); attempt();
 #              after_write(); show_block(kind); connection, table, where, order_by, descending, row_offset
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (Database Editor). Opens the last database / table again; the DevOS system
 #                  database is listed read-only for inspection.
 # ==============================================================================
@@ -51,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.modules.db_editor.blocks import DEFAULT_BLOCKS, block_specs
 from app.modules.db_editor.dialogs import ColumnDialog, CreateTableDialog, IndexDialog
@@ -59,6 +60,7 @@ from app.modules.db_editor.engine import SYSTEM_DATABASE_ID, DbConnection, DbEdi
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.ui_tools import set_style_property, tool_button
 from app.ui.widgets.tiling_layout import DROP_ZONE_BOTTOM
+from app.ui.engine_bridge import watch_library
 # --- END [1.1] ---
 
 
@@ -108,7 +110,7 @@ class DbEditorModule(ModuleView):
         self.block_canvas = self.build_block_canvas(block_specs(self), DEFAULT_BLOCKS)
         layout.addWidget(self.block_canvas, 1)
 
-        get_content_store().add_listener(self._on_content_changed)
+        watch_library(self, self._on_content_changed)
         self._fill_db_combo()
         saved_id = self.setting("database_id")
         if saved_id is not None and self.databases.entry(saved_id) is not None:
@@ -264,7 +266,7 @@ class DbEditorModule(ModuleView):
         return menu
 
     def new_database(self) -> None:
-        name = self.ask_text("New database", "Name:", get_content_store().unique_name(UserDatabases.KIND, "New database"))
+        name = self.ask_text("New database", "Name:", library().unique_name(UserDatabases.KIND, "New database"))
         if name:
             entry = self.attempt("Create database", self.databases.create, name)
             if entry is not None:

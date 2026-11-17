@@ -8,13 +8,15 @@
 #   2. Sending runs off the UI thread (run_in_thread with progress); Stop keeps the answer so far; a failed
 #      turn puts your message back in the box and says what went wrong (missing key, Ollama not running).
 # CONTRACT:
-#   - Requires: app.modules.agents (engine, store), app.ui.record_views.RecordsController (module.controller),
-#               app.ui.ui_tools, app.data.store.content, QSS selectors #chat_messages_panel,
+#   - Requires: app.modules.agents (engine, store), app.modules.records_module.RecordFocus (module.focus),
+#               app.ui.ui_tools, app.clients.library, QSS selectors #chat_messages_panel,
 #               #chat_message_panel[role], #chat_caption_label, #chat_message_label, #chat_input_edit,
 #               #chat_agent_label
-#   - Exposes: ChatBlock(module) (module: controller, context, base_urls()) with reload_models(); ChatInput;
+#   - Exposes: ChatBlock(module) (module: focus, context, base_urls()) with reload_models(); ChatInput;
 #              forget_listed_models()
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
+#   - [2026-11-17] Follows module.focus (the page's selected agent, from the records engine) instead of the old controller.
 #   - [2026-11-17] Created: chat with agents directly in the Agents module.
 # ==============================================================================
 
@@ -51,7 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.agents.engine import (
     DEFAULT_MODELS, KNOWN_MODELS, PROVIDERS, AgentError, ChatMessage, api_key, chat_config, list_models, model_of,
     provider_of, stream_chat,
@@ -93,7 +95,7 @@ class ChatInput(QPlainTextEdit):
 class ChatBlock(QWidget):
     def __init__(self, module) -> None:
         super().__init__()
-        self.module, self.controller = module, module.controller
+        self.module, self.focus = module, module.focus
         self.store = get_chat_store(module.context.database if module.context is not None else None)
         self.log = get_activity_log()
         self.agent_id: int | None = None
@@ -152,12 +154,12 @@ class ChatBlock(QWidget):
         layout.addWidget(self.chat_status_label)
 
         self._redraw_timer = QTimer(self, singleShot=True, interval=REDRAW_MS, timeout=self._redraw_answer)
-        self.controller.selection_changed.connect(self.refresh)
-        self.controller.records_changed.connect(self._refresh_header)
+        self.focus.selection_changed.connect(self.refresh)
+        self.focus.records_changed.connect(self._refresh_header)
         self.refresh()
 
     def refresh(self) -> None:
-        record = self.controller.selected()
+        record = self.focus.selected()
         agent_id = record.record_id if record is not None else None
         if agent_id != self.agent_id:
             self.agent_id = agent_id
@@ -171,7 +173,7 @@ class ChatBlock(QWidget):
 # [1.4] header
 # ==============================================================================
     def _refresh_header(self) -> None:
-        record = self.controller.selected() if self.agent_id is not None else None
+        record = self.focus.selected() if self.agent_id is not None else None
         has_agent = record is not None
         for widget in (self.provider_combo, self.model_combo, self.conversation_combo, self.more_btn, self.chat_input_edit):
             widget.setEnabled(has_agent)
@@ -231,28 +233,28 @@ class ChatBlock(QWidget):
         self._refresh_header()
 
     def _on_provider_chosen(self, _index: int) -> None:
-        record = self.controller.selected()
+        record = self.focus.selected()
         provider = self.provider_combo.currentText()
         if record is None or provider == provider_of(record.values):
             return
         base_url = self.module.base_urls().get(provider, "")
         offered = _model_cache.get((provider, base_url)) or KNOWN_MODELS[provider]
         model = record.values.get("model")
-        self.controller.set_value(record.record_id, "provider", provider)
-        self.controller.set_value(record.record_id, "model", model if model in offered else DEFAULT_MODELS[provider])
+        self.focus.update(record.record_id, {"provider": provider,
+                                             "model": model if model in offered else DEFAULT_MODELS[provider]})
 
     def _on_model_chosen(self, *_args) -> None:
-        record = self.controller.selected()
+        record = self.focus.selected()
         model = self.model_combo.currentText().strip()
         if record is not None and model and model != record.values.get("model"):
-            self.controller.set_value(record.record_id, "model", model)
+            self.focus.set_value(record.record_id, "model", model)
 # --- END [1.4] ---
 
 # ==============================================================================
 # [1.5] messages
 # ==============================================================================
     def _render_messages(self) -> None:
-        record = self.controller.selected() if self.agent_id is not None else None
+        record = self.focus.selected() if self.agent_id is not None else None
         messages = self.store.messages(self.conversation_id) if self.conversation_id is not None else []
         is_live = self.run is not None and self.run["conversation_id"] == self.conversation_id and self.conversation_id is not None
         if record is None:
@@ -323,7 +325,7 @@ class ChatBlock(QWidget):
             self.run["stop"].set()
             set_status(self.chat_status_label, "Stopping…")
             return
-        record = self.controller.selected()
+        record = self.focus.selected()
         text = self.chat_input_edit.toPlainText().strip()
         if record is None:
             set_status(self.chat_status_label, "Select an agent to chat with", is_error=True)
@@ -416,7 +418,7 @@ class ChatBlock(QWidget):
 
     def chat_markdown(self) -> str:
         conversation = self._conversation()
-        record = self.controller.selected()
+        record = self.focus.selected()
         if conversation is None or record is None:
             return ""
         lines = [f"# {conversation.title}", "", f"Chat with {record.title}", ""]
@@ -431,7 +433,7 @@ class ChatBlock(QWidget):
             set_status(self.chat_status_label, "Nothing to save yet", is_error=True)
             return
         with self.log.step("agents", f"Save chat “{conversation.title}” to the Library"):
-            item = get_content_store().create_text("note", conversation.title, self.chat_markdown(), ".md")
+            item = library().create_text("note", conversation.title, self.chat_markdown(), ".md")
         set_status(self.chat_status_label, f"Saved “{item.name}” in your Library (Notes)")
 
     def delete_chat(self) -> None:

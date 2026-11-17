@@ -4,7 +4,51 @@ All notable changes to DevOS. Versions follow [Semantic Versioning](https://semv
 Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-11-17
+Engine plan Phases 0–4: safety net, kernel, view runtime, docking, Knowledge engine.
+
 ### Added
+- Engine plan Phase 4 (Knowledge engine):
+  - Knowledge 0.2 owns the Library (`engines/knowledge/`, a core engine): file service, source contract
+    (`library` + one table per kind), `links` (Graph shape), Document shape with a note's links, `changed` events.
+  - `app/clients/library.py` (`library()`, `LibraryError`) and `watch_library()`; `app/data/content_kinds.py`.
+  - `SourceModule` (`app/modules/source_module.py`): modules made of views over one engine source.
+  - View types `document` (Markdown editor + preview, autosave, `[[links]]`) and `links` (note graph);
+    `ViewType.requests`, `host.request()`, read-only fields.
+  - Settings → Engines marks core engines and keeps Detach off for them.
+  - `check_standard.py`: `app/` never imports an engine package's internals.
+  - `tests/test_knowledge.py`.
+- Engine plan Phase 3 (docking and standards):
+  - Engine packages (engine.json) discovered in `engines/` and `<data>/engine-packages/`.
+  - Attach / detach (remembered, requires checked), capability queries.
+  - Conformance kit (`python -m engines.kernel.conformance`).
+  - Request timeouts, busy engines, stream back-pressure (credit), `stream_engine(window, latest)`.
+  - Engine-bundled view types; placeholders that come back on attach.
+  - Settings → Engines; Bus inspector (window and tool).
+  - Example package `examples/engines/sample_data`; `tests/test_docking.py`.
+- Engine plan Phase 2:
+  - Data shapes v1 (`engines/kernel/shapes.py`, Arrow attachments, `docs/shapes.md`).
+  - Query v1 (`engines/kernel/query.py`) and shape toolkits (`engines/toolkit/`).
+  - Records engine (`engines/records/`).
+  - View runtime (`app/views/`: view type API, ViewHost, page-wide channels with unlink, shared subscriptions, filter bar, view builder; `docs/views-api.md`).
+  - "New view…" in record modules; Data view module; `tests/test_views.py`.
+- `ROADMAP.md`: current state, Now / Next / Later, Done, direction, future ideas, open questions; updated every
+  session (AGENTS.md routine, `check_standard.py` warning). The phases moved there from the engine plan, which
+  keeps the design.
+- Engine plan revised: seven engines (Spatial added: US census / parcel data, cartography first, then QGIS
+  processing), ten data shapes with Arrow attachments, communication principles, new phases Docking and standards
+  (3), Spatial (6), Displays (7), Signals and Streams (9); phases renumbered.
+- Engine plan Phase 1: the kernel (`engines/kernel/`: messages, Engine, InProcessHost, Bus), `engines/runtime.py`
+  (shared bus, engine logs into the System Log, shutdown at exit), `app/ui/engine_bridge.py` (call / stream / watch
+  from widgets, answers on the UI thread), Knowledge engine stub; `tests/test_engine_kernel.py`.
+- Engine plan Phase 0: `docs/architecture/engine-plan.md` and `data-ownership.md`.
+- Backups (`app/data/store/backup.py`): consistent SQLite copies, unchanged files hard-linked, SHA-256 manifest,
+  check, prune, restore at the next start (current state backed up first), command line
+  (`python -m app.data.store.backup`). Settings → Data page and a "Back up data" tool.
+- `Database.migrate()` backs up before upgrading tables that hold data and refuses to migrate without a backup.
+- Migration fixture `tests/fixtures/data_v0` (+ expectations, make / check scripts); `tests/test_data_safety.py`.
+- `check_standard.py` layer boundaries: `engines/` and `app/data/` never import Qt, views or modules.
 - Agents chat: + New agent → Claude / Gemini / Ollama agent; a Chat view that streams answers from the selected
   agent (its Instructions are the system prompt), chats kept per agent (rename, save to Library, delete), provider
   and model switchable in the view; ⚙ settings for API keys (system keyring) and the Ollama address; Provider and
@@ -56,6 +100,20 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
   docked resizable panel, filters, past sessions; saved to SQLite every 15 s and at exit; Python / thread / Qt hooks.
 
 ### Changed
+- The bus was rewritten for Phase 3 (one pending record per request: deadlines, stats, taps); `Bus.call()` uses
+  the request's own timeout unless given one. The mock market-feed test compares bars by open time (it failed when
+  a minute boundary fell between two calls).
+- Projects and Agents run on the view runtime over the records engine (old block settings are upgraded); the
+  Agents chat follows `RecordFocus`. `app/ui/record_views.py` (RecordsController and the record blocks) removed.
+- The Library module lists and previews items through the Knowledge engine.
+- Phase 4: Notes and Library are SourceModules made of views over Knowledge (Notes keeps its `note_id` and `mode`
+  settings); `RecordsModule` is a thin SourceModule; `BlockCanvas(spec_factory=…)` restores views of kinds a
+  module didn't list. Every former content-store caller uses `library()`. `knowledge.get {item_id}` is now
+  `knowledge.item` (`get` is the source contract's). Library import reports every file it couldn't import (the
+  last failure used to be overwritten by the summary).
+- Wave Simulator and RF Imaging: a local `library` variable no longer shadows `library()`.
+- The Settings page is real (`SettingsPage`); `PlaceholderPage` removed.
+- `Tensor4D.inspect()` removed (it pulled Qt into the data layer); call `launch_inspector(tensor)` instead.
 - Part Design: the 1-4 step list on the left is now a progress bar across the top (name, steps, Back / Next in
   one row; the work area uses the full width). Clicking a locked step says why it can't start.
 - `shell.nix` provides n8n (the only unfree package allowed; `--arg withN8n false` skips it); the n8n web app
@@ -78,6 +136,7 @@ Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 - `check_standard.py`: changed files need a NOTES entry dated on/after the last commit (not exactly today).
 
 ### Removed
+- `app/data/store/content.py` / `get_content_store()` (moved into the Knowledge engine as `engines/knowledge/store.py`).
 - Home page (system monitors), Trading Dashboard pages (Overview, Market Lab, Co-Pilot, Account Manager,
   Simulation Sandbox, System Monitor), fixed Project Editor page (migrated into a user page), `StatCard`,
   unused theme sections and dead helpers, module library bar, `rf_imaging/store.py`.

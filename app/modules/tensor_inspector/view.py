@@ -9,7 +9,7 @@
 #   3. ScatterBlock: the volume at the chosen time step above the threshold, coloured by value, with a
 #      white line for every waterfall block's sampling line.
 #   4. Live mode: a timer pushes new frames from the demo wave source into the tensor.
-#   5. launch_inspector() opens the inspector in its own window (used by Tensor4D.inspect()).
+#   5. launch_inspector(tensor) opens the inspector in its own window (for scripts and the Python console).
 # CONTRACT:
 #   - Requires: numpy, pyqtgraph (+ opengl), app.data.tensor4d (Tensor4D, wave_frame), app.modules.base,
 #               app.ui (block_canvas, gl_support, plot_tools, ui_tools, theme), QSS selectors
@@ -18,6 +18,7 @@
 #   - Exposes: TensorInspectorModule(tensor=None, is_live=True, parent=None, context=None); set_tensor();
 #              refresh_views(); time_step; launch_inspector(tensor, title) -> QWidget
 # NOTES:
+#   - [2026-11-17] Tensor4D.inspect() is gone (the data layer stays Qt-free); call launch_inspector() directly.
 #   - [2026-11-15] Created. Built on PySide6 + pyqtgraph (pyqtgraph auto-selects PySide6). PyQt6 was
 #                  not used: it can't share a process with PySide6 (both bind the same Qt libraries).
 #   - [2026-11-15] If the OpenGL 3D view can't be created, a label replaces it (gl_support probe;

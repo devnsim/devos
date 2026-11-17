@@ -14,6 +14,7 @@
 #              save_setting(), setup_live(interval_ms, on_tick), set_live(), live_toggle_btn,
 #              build_block_canvas(specs, default_layout) -> BlockCanvas, is_live
 # NOTES:
+#   - [2026-11-17] build_block_canvas(spec_factory=...) for modules whose blocks are views of any type.
 #   - [2026-11-15] Created in the health pass: four modules each re-implemented settings helpers, the
 #                  live timer, show/hide gating and the toggle button.
 # ==============================================================================
@@ -109,10 +110,11 @@ class ModuleView(QWidget):
 # ==============================================================================
 # [1.3] blocks
 # ==============================================================================
-    def build_block_canvas(self, specs: list[BlockSpec], default_layout: dict | None = None) -> BlockCanvas:
+    def build_block_canvas(self, specs: list[BlockSpec], default_layout: dict | None = None,
+                           spec_factory=None) -> BlockCanvas:
         """A BlockCanvas whose layout is saved in this module's settings."""
         return BlockCanvas(
             specs, save_layout=lambda layout: self.save_setting(self.BLOCKS_SETTING, layout),
-            saved_layout=self.setting(self.BLOCKS_SETTING), default_layout=default_layout,
+            saved_layout=self.setting(self.BLOCKS_SETTING), default_layout=default_layout, spec_factory=spec_factory,
         )
 # --- END [1.3] ---

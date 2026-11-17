@@ -8,10 +8,11 @@
 #      and Appearance tab (title, axis labels, grid, line width, markers, legend).
 #   3. Remembers its dataset, columns and appearance in its module settings.
 # CONTRACT:
-#   - Requires: pyqtgraph, app.modules.base.ModuleView, app.modules.graph.datasets, app.data.store.content,
+#   - Requires: pyqtgraph, app.modules.base.ModuleView, app.modules.graph.datasets, app.clients.library,
 #               app.ui (plot_tools, settings_dialog, ui_tools, canvas.tile_canvas), app.data.activity_log
 #   - Exposes: GraphModule(parent=None, context=None); apply_config(config); config (dict); dataset
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-15] Created (reusable tools). Data never leaves the content library: imports are copied in,
 #                  mock data is saved there, the user never picks a save location.
 #   - [2026-11-15] apply_config reloads only when the chosen dataset differs from the one on screen.
@@ -45,13 +46,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.modules.graph.datasets import DatasetError, MOCK_GENERATORS, import_csv, load_dataset, make_mock, save_dataset
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.plot_tools import styled_plot
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.ui_tools import control_label, tool_button
+from app.ui.engine_bridge import watch_library
 
 LINE_COLORS = [(100, 181, 246), (255, 183, 77), (129, 199, 132), (240, 98, 146), (179, 157, 219), (77, 182, 172)]
 DEFAULT_CONFIG = {"dataset_id": None, "x_column": None, "y_columns": [], "title": "", "x_label": "", "y_label": "",
@@ -85,7 +87,7 @@ class GraphModule(ModuleView):
         self.placeholder = pg.TextItem("No data yet — open ⚙ settings to choose, import or create a dataset",
                                        color=(140, 140, 140), anchor=(0.5, 0.5))
         self.plot.addItem(self.placeholder)
-        get_content_store().add_listener(self._on_content_changed)
+        watch_library(self, self._on_content_changed)
         self._load_and_plot()
 # --- END [2.1] ---
 
@@ -209,7 +211,7 @@ class GraphModule(ModuleView):
     def _fill_dataset_list(self) -> None:
         self.dataset_list.blockSignals(True)
         self.dataset_list.clear()
-        for item in get_content_store().items("dataset"):
+        for item in library().items("dataset"):
             row = QListWidgetItem(item.name)
             row.setData(Qt.ItemDataRole.UserRole, item.item_id)
             self.dataset_list.addItem(row)
@@ -289,13 +291,13 @@ class GraphModule(ModuleView):
     def _on_delete_dataset(self) -> None:
         current = self.dataset_list.currentItem()
         if current is not None:
-            get_content_store().delete(current.data(Qt.ItemDataRole.UserRole))
+            library().delete(current.data(Qt.ItemDataRole.UserRole))
 
     def _on_content_changed(self, kind: str) -> None:
         if kind != "dataset":
             return
         if self.settings_window is not None and self.settings_window.isVisible():
             self._fill_dataset_list()
-        if self.config["dataset_id"] is not None and get_content_store().get(self.config["dataset_id"]) is None:
+        if self.config["dataset_id"] is not None and library().get(self.config["dataset_id"]) is None:
             self.apply_config({"dataset_id": None})
 # --- END [2.4] ---

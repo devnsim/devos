@@ -11,6 +11,10 @@
 #               #selector no widget uses, so this list can't silently go stale.
 #   - Exposes: STYLESHEET (str) and every *_COLOR / *_PX token, for widgets that need a color in code.
 # NOTES:
+#   - [2026-11-17] Notes / Library panels styles gone (they are SourceModules now); #document_title_label.
+#   - [2026-11-17] #records_module_panel became #source_module_panel (SourceModule, Phase 4).
+#   - [2026-11-17] View styles (#view_host_panel, #view_message_label, #view_menu_btn, #filter_bar_panel, #data_view_panel).
+#   - [2026-11-17] Settings page styles (#settings_section_label, #settings_banner_label).
 #   - [2026-11-17] Agents chat styles (#chat_*); the Part Design step list styles went (it is a painted step bar now).
 #   - [2026-11-17] Styles for Canvas pages (#infinite_canvas_*, #module_card_panel, #card_*, #canvas_control*),
 #                  the New Canvas button and the web app's floating options button (#web_app_options_btn).
@@ -265,6 +269,9 @@ PAGE_HEADING_QSS = f"""
     color: {TEXT_COLOR};
 }}
 #page_subtitle_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; }}
+/* Settings page (settings_page.py) */
+#settings_section_label {{ font-size: 15px; font-weight: 600; color: {TEXT_COLOR}; background: transparent; padding-top: 12px; }}
+#settings_banner_label {{ color: {WARNING_COLOR}; background: {HEADER_COLOR}; border-left: 3px solid {WARNING_COLOR}; padding: 6px; }}
 /* Editable page title (page template): looks like a heading until focused */
 #page_title_edit {{
     background: transparent; border: 1px solid transparent; border-radius: {CORNER_RADIUS_PX}px;
@@ -378,10 +385,10 @@ MODULE_QSS = f"""
 #live_toggle_btn:hover {{ background: {HOVER_COLOR}; }}
 #live_toggle_btn:checked {{ background: {ACCENT_COLOR}; color: {SELECTED_TEXT_COLOR}; }}
 /* Tools: Graph, Notes, Library (+ their gear button and settings windows) */
-#graph_panel, #notes_panel, #library_panel {{ background: transparent; }}
+#graph_panel {{ background: transparent; }}
 #module_settings_btn {{ background: transparent; border: none; border-radius: {CORNER_RADIUS_PX}px; padding: 3px; }}
 #module_settings_btn:hover {{ background: {HOVER_COLOR}; }}
-#note_name_edit {{ font-weight: 600; }}
+#document_title_label {{ font-weight: 600; background: transparent; padding: 0px 4px; }}
 #note_editor, #note_preview {{ background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR}; padding: 6px; }}
 #settings_dialog {{ background: {PANEL_COLOR}; }}
 /* Database Editor */
@@ -398,9 +405,14 @@ MODULE_QSS = f"""
 #module_status_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; background: transparent; padding: 0px 6px; }}
 #module_status_label[is_error="true"] {{ color: {ERROR_COLOR}; }}
 /* Module panels without their own background */
-#records_module_panel, #spreadsheet_panel, #monitor_panel, #graph_db_panel, #map_panel, #web_app_panel, #comms_panel,
+#source_module_panel, #spreadsheet_panel, #monitor_panel, #graph_db_panel, #map_panel, #web_app_panel, #comms_panel,
 #cad_panel, #web_app_setup_panel {{ background: transparent; }}
-/* Record views (record_views.py): board, form */
+/* Views (app/views/): host, filter bar, board, form */
+#view_host_panel, #data_view_panel {{ background: transparent; }}
+#view_message_label {{ color: {MUTED_TEXT_COLOR}; font-size: 13px; background: transparent; padding: 20px; }}
+#view_menu_btn {{ background: transparent; border: none; padding: 0px 4px; }}
+#view_menu_btn::menu-indicator {{ image: none; width: 0px; }}
+#filter_bar_panel {{ background: {HEADER_COLOR}; border-bottom: 1px solid {BORDER_COLOR}; }}
 #board_column_panel {{ background: {PANEL_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: 4px; }}
 #board_column_label {{ font-weight: 600; padding: 2px 6px; background: transparent; }}
 #record_title_edit {{ font-size: 15px; font-weight: 600; background: transparent; border: 1px solid transparent; }}

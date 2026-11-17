@@ -13,6 +13,7 @@
 #               app.modules.projects, app.modules.cad.workbench. No network: the fake server listens on 127.0.0.1.
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] Phase 2: records go through the records engine (module.focus, ViewHosts); waits for engine answers.
 #   - [2026-11-17] Created with the Agents chat, record form requests and the Part Design step bar.
 # ==============================================================================
 
@@ -169,12 +170,12 @@ def test_agent_chat_view(qapp, database, pump, wait_for, fake_provider, monkeypa
 
     new_btn = next(button for button in view.findChildren(QPushButton) if button.text() == "+ New agent")
     assert [action.text() for action in new_btn.menu().actions()] == ["Claude agent", "Gemini agent", "Ollama agent"]
-    new_btn.menu().actions()[2].trigger()
-    pump()
-    agent = view.controller.selected()
-    assert agent.title == "New Ollama agent" and agent.values["provider"] == "Ollama"
+    new_btn.menu().actions()[2].trigger()                            # through the records engine
+    assert wait_for(lambda: view.focus.selected() is not None and view.focus.selected().title == "New Ollama agent", 5)
+    agent = view.focus.selected()
+    assert agent.values["provider"] == "Ollama"
     chat = view.block_canvas.blocks("chat")[0]                       # in the default layout
-    assert chat.agent_id == agent.record_id and chat.provider_combo.currentText() == "Ollama"
+    assert wait_for(lambda: chat.agent_id == agent.record_id, 5) and chat.provider_combo.currentText() == "Ollama"
     assert wait_for(lambda: chat.model_combo.findText("qwen3:8b") >= 0, 5)      # the installed models were listed
 
     chat.chat_input_edit.setPlainText("What can you do?")
@@ -186,22 +187,23 @@ def test_agent_chat_view(qapp, database, pump, wait_for, fake_provider, monkeypa
     assert chat.store.conversations(agent.record_id)[0].title == "What can you do?"
     assert "3 out tokens" in chat.chat_status_label.text()
 
-    claude = view.controller.new_record({"provider": "Claude"}, "Claude helper")   # no key: the message comes back
-    pump()
-    assert chat.agent_id == claude.record_id and chat.conversation_id is None
+    view.create_record({"provider": "Claude"}, "Claude helper")    # no key: the message comes back
+    assert wait_for(lambda: view.focus.selected() is not None and view.focus.selected().title == "Claude helper", 5)
+    claude = view.focus.selected()
+    assert wait_for(lambda: chat.agent_id == claude.record_id, 5) and chat.conversation_id is None
     chat.chat_input_edit.setPlainText("hello")
     chat.send()
     assert wait_for(lambda: chat.run is None, 5)
     assert chat.chat_input_edit.toPlainText() == "hello" and "No Claude API key" in chat.chat_status_label.text()
     assert chat.store.messages(chat.store.conversations(claude.record_id)[0].conversation_id) == []
 
-    view.controller.select(agent.record_id)                          # back: the latest chat shows again
-    pump()
+    view.focus.select(agent.record_id)                               # back: the latest chat shows again
+    assert wait_for(lambda: chat.agent_id == agent.record_id, 5)
     first_chat = chat.conversation_id
     chat.new_chat()
     assert chat.conversation_id is None and chat.conversation_combo.currentText() == "New chat"
     chat.show_conversation(first_chat)
-    menu = view.controller.record_menu(agent.record_id, view)
+    menu = view.block_canvas.blocks("table")[0].record_menu(agent.record_id)
     assert [action.text() for action in menu.actions() if action.text()] == [
         "Open form", "Chat with agent", "Duplicate", "Delete agent…"]
     monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes)
@@ -214,7 +216,7 @@ def test_agent_chat_view(qapp, database, pump, wait_for, fake_provider, monkeypa
 # ==============================================================================
 # [2.3] record_forms
 # ==============================================================================
-def test_double_click_and_right_click_open_a_records_form(qapp, database, pump):
+def test_double_click_and_right_click_open_a_records_form(qapp, database, pump, wait_for):
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
 
@@ -226,36 +228,38 @@ def test_double_click_and_right_click_open_a_records_form(qapp, database, pump):
     canvas = module.block_canvas
     canvas.close_tile(next(tile for tile in canvas.tiles.values() if tile.kind == "form"))   # no form view open
     pump()
-    first = module.controller.new_record({"status": "Active", "start": "2026-03-01", "due": "2026-03-10"}, title="Ship")
-    second = module.controller.new_record({"status": "Active"}, title="Plan")
-    pump()
+    module.create_record({"status": "Active", "start": "2026-03-01", "due": "2026-03-10"}, title="Forms ship")
+    module.create_record({"status": "Active"}, title="Forms plan")
+    board = canvas.blocks("board")[0]                                   # a ViewHost; board.view is the board
+    titles = lambda host: {row["title"]: row["id"] for row in (host.data.rows if host.data else [])}   # noqa: E731
+    assert wait_for(lambda: {"Forms ship", "Forms plan"} <= set(titles(board)), 5)
+    first, second = titles(board)["Forms ship"], titles(board)["Forms plan"]
 
-    board = canvas.blocks("board")[0]
-    column = next(column for column in board.column_lists if column.value == "Active")
-    item = next(column.item(index) for index in range(column.count()) if column.item(index).text().startswith("Ship"))
+    column = next(column for column in board.view.column_lists if column.value == "Active")
+    item = next(column.item(index) for index in range(column.count()) if column.item(index).text().startswith("Forms ship"))
     column.itemDoubleClicked.emit(item)                                # double-click a card: its form opens
-    pump()
     forms = canvas.blocks("form")
-    assert len(forms) == 1 and forms[0].shown_id == first.record_id
+    assert len(forms) == 1 and wait_for(lambda: forms[0].view.shown_id == first, 5)
     assert canvas.active_tile.kind == "form"
 
     timeline = canvas.blocks("timeline")[0]                            # double-click a name on the Gantt chart
-    row = next(index for index, (record, _start, _end) in enumerate(timeline.canvas.rows) if record.record_id == second.record_id)
-    y = timeline.canvas.HEADER_PX + row * timeline.canvas.ROW_PX + timeline.canvas.ROW_PX // 2
-    QTest.mouseDClick(timeline.canvas, Qt.MouseButton.LeftButton, pos=QPoint(timeline.canvas.visible_left() + 20, y))
-    pump()
-    assert len(canvas.blocks("form")) == 1 and forms[0].shown_id == second.record_id   # the same form, brought forward
-    assert module.collection.get(second.record_id).values.get("start") is None      # the name column doesn't schedule
+    gantt = timeline.view.canvas
+    row = next(index for index, (item_row, _start, _end) in enumerate(gantt.rows) if item_row["id"] == second)
+    y = gantt.HEADER_PX + row * gantt.ROW_PX + gantt.ROW_PX // 2
+    QTest.mouseDClick(gantt, Qt.MouseButton.LeftButton, pos=QPoint(gantt.visible_left() + 20, y))
+    assert wait_for(lambda: forms[0].view.shown_id == second, 5) and len(canvas.blocks("form")) == 1
+    pump(0.3)
+    assert timeline.data.row(second).get("start") is None             # the name column doesn't schedule
 
-    menu = module.controller.record_menu(first.record_id, module)       # right-click in any view
+    menu = board.record_menu(first)                                     # right-click in any view
     assert [action.text() for action in menu.actions() if action.text()] == ["Open form", "Duplicate", "Delete project…"]
-    assert module.controller.selected_id == first.record_id
+    assert board.selected_id == first and wait_for(lambda: forms[0].view.shown_id == first, 5)
     canvas._set_active_tile(next(tile for tile in canvas.tiles.values() if tile.kind == "board"))
     menu.actions()[0].trigger()
-    assert canvas.active_tile.kind == "form" and forms[0].shown_id == first.record_id
-    menu.actions()[2].trigger()                                         # Duplicate
-    pump()
-    assert module.collection.count() == 3 and module.controller.selected().title.startswith("Ship")
+    assert canvas.active_tile.kind == "form"
+    menu.actions()[2].trigger()                                         # Duplicate: the copy is selected everywhere
+    assert wait_for(lambda: "Forms ship (copy)" in titles(board) and board.selected_id == titles(board)["Forms ship (copy)"], 5)
+    assert wait_for(lambda: forms[0].view.title_edit.text() == "Forms ship (copy)", 5)
     module.deleteLater()
 # --- END [2.3] ---
 

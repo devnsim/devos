@@ -17,6 +17,7 @@
 #              add_custom_material(); step_once(); attributes engine, scene, store, materials, last_result,
 #              block_canvas
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-15] Created from the "first-principles physics engine" spec: LC-tank oscillator 1-10 GHz
 #                  (FMCW / OFDM), spherical 1/r waves with e^{-jkr}, CAD import (trimesh), dielectric
 #                  ray tracing (C++ devos_core), 4D tensor (nodes x time x freq x [amp, phase]).
@@ -62,7 +63,7 @@ from PySide6.QtWidgets import (
 from app import native
 from app.data.activity_log import get_activity_log
 from app.data.em_materials import MATERIAL_BY_NAME
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.modules.wave_sim.blocks import DEFAULT_BLOCKS, block_specs
@@ -114,10 +115,10 @@ class WaveSimModule(ModuleView):
         tx = self.setting("tx_position_m")
         if tx:
             self.scene.tx_position_m = np.array(tx, float)
-        library = get_content_store()
+        store = library()
         for imported in self.setting("imported_meshes", []):
-            item = library.get(imported["item_id"]) if imported.get("item_id") else None
-            path = library.path(item) if item else Path(imported.get("path", ""))   # "path": scenes saved earlier
+            item = store.get(imported["item_id"]) if imported.get("item_id") else None
+            path = store.path(item) if item else Path(imported.get("path", ""))   # "path": scenes saved earlier
             if not path.exists() or imported.get("material") not in self.materials:
                 self.log.warning("wave_sim", f"Scene mesh missing, skipped: {item.name if item else path.name}")
                 continue
@@ -263,11 +264,11 @@ class WaveSimModule(ModuleView):
 
     def import_mesh(self, file_path: str, material_name: str | None = None, place_at_m=(0.0, 1.0)) -> None:
         """Copy a mesh file into the user's library and add it to the scene (also used by tests and scripts)."""
-        library = get_content_store()
+        store = library()
         try:
             with self.log.step("wave_sim", f"Import CAD model {Path(file_path).name}"):
                 body = load_mesh_file(file_path, material_name or self.DEFAULT_IMPORT_MATERIAL, place_at_m)
-                item = library.add_file("cad", file_path, metadata={"triangles": int(len(body.faces))})
+                item = store.add_file("cad", file_path, metadata={"triangles": int(len(body.faces))})
         except (ValueError, OSError):
             return                                               # step() logged the reason
         body.library_item_id = item.item_id

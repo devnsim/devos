@@ -11,11 +11,12 @@
 #   3. Toolbar: "go to" field (lat, lon), coordinates under the mouse, status line.
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.modules.map.store, app.ui.web_support (profile, availability),
-#               app.data.store.content, app.ui (ui_tools, tool_bag, canvas), network access for tiles and
+#               app.clients.library, app.ui (ui_tools, tool_bag, canvas), network access for tiles and
 #               Leaflet (unpkg.com), QSS selector #map_panel
 #   - Exposes: MapModule(parent=None, context=None) with store, add_place(), go_to(), places_changed, layers_changed,
 #              view_requested; MapBlock, PlacesBlock, LayersBlock, BASE_LAYERS, LEAFLET_VERSION
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (Map / GIS module).
 # ==============================================================================
 
@@ -55,7 +56,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.data.store.database import get_database
 from app.modules.base import ModuleView
 from app.modules.map.store import MapStore, places_geojson
@@ -65,6 +66,7 @@ from app.ui.theme import TAG_COLORS
 from app.ui.tool_bag import ToolSpec, register_tools
 from app.ui.ui_tools import add_button, block_layout, control_label, set_status, status_label
 from app.ui.web_support import browser_profile, web_engine_unavailable_reason
+from app.ui.engine_bridge import watch_library
 
 LEAFLET_VERSION = "1.9.4"
 BASE_LAYERS = {          # name: (tile URL, attribution, max zoom, dark: invert the tiles to suit the dark theme)
@@ -231,7 +233,7 @@ class MapBlock(QWidget):
 
     def push_layers(self) -> None:
         visible = set(self.module.setting("visible_layers", []))
-        store = get_content_store()
+        store = library()
         for index, item in enumerate(store.items("geo")):
             is_visible = item.item_id in visible
             data = "null"
@@ -340,7 +342,7 @@ class LayersBlock(QWidget):
         visible = set(self.module.setting("visible_layers", []))
         self.layer_list.blockSignals(True)
         self.layer_list.clear()
-        for item in get_content_store().items("geo"):
+        for item in library().items("geo"):
             entry = QListWidgetItem(item.name)
             entry.setData(Qt.ItemDataRole.UserRole, item.item_id)
             entry.setFlags(entry.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -397,8 +399,7 @@ class MapModule(ModuleView):
             BlockSpec("layers", "Layers", "Base map and GeoJSON layers from your library", lambda: LayersBlock(self)),
         ], DEFAULT_BLOCKS)
         layout.addWidget(self.block_canvas, 1)
-        get_content_store().add_listener(self._on_content_changed)
-        self.destroyed.connect(lambda *_: get_content_store().remove_listener(self._on_content_changed))
+        watch_library(self, self._on_content_changed)
 
     def report(self, text: str, is_error: bool = False) -> None:
         if is_error:
@@ -487,12 +488,12 @@ class MapModule(ModuleView):
             self.report(f"Import failed: {error}", is_error=True)
             return
         with self.log.step("map", f"Import layer {Path(path).name}"):
-            item = get_content_store().add_bytes("geo", Path(path).stem, Path(path).read_bytes(), ".geojson")
+            item = library().add_bytes("geo", Path(path).stem, Path(path).read_bytes(), ".geojson")
         self.set_layer_visible(item.item_id, True)
 
     def export_places(self) -> None:
         with self.log.step("map", "Export places as GeoJSON"):
-            item = get_content_store().create_text("geo", "My places", places_geojson(self.store.places()), ".geojson")
+            item = library().create_text("geo", "My places", places_geojson(self.store.places()), ".geojson")
         self.report(f"Saved “{item.name}” in your Library (Map layers)")
 
 

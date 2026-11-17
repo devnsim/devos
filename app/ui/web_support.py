@@ -13,12 +13,13 @@
 #   5. set_web_views_suspended(root, is_suspended): a page that has no tab stops its web content (sound,
 #      video, scripts) by discarding its web views; they reload when the page is shown again.
 # CONTRACT:
-#   - Requires: PySide6 (QtWebEngineCore / QtWebEngineWidgets, optional), app.data.store.content
-#               (get_content_store, kind_for_path), app.data.store.database.data_directory, app.data.activity_log
+#   - Requires: PySide6 (QtWebEngineCore / QtWebEngineWidgets, optional), app.clients.library,
+#               app.data.content_kinds.kind_for_path, app.data.store.database.data_directory, app.data.activity_log
 #   - Exposes: prepare_web_engine(), shutdown_web_engine(), web_engine_unavailable_reason(), browser_profile(), container_profile(name),
 #              container_names(), container_slug(), address_to_url(), set_web_views_suspended(root, is_suspended),
 #              HOME_URL, SEARCH_URL
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-17] set_web_views_suspended(): closed pages kept playing music (a YouTube Music web app went on
 #                  after every tab was closed). Discarded web views stop and free their memory.
 #   - [2026-11-16] shutdown_web_engine(): pages are deleted before their profiles on exit (the app and the test
@@ -59,7 +60,8 @@ from urllib.parse import quote_plus
 from PySide6.QtCore import QCoreApplication, Qt
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store, kind_for_path
+from app.clients.library import library
+from app.data.content_kinds import kind_for_path
 from app.data.store.database import data_directory
 
 HOME_URL = "https://duckduckgo.com/"
@@ -163,7 +165,7 @@ def _on_download_requested(request) -> None:
     from PySide6.QtWebEngineCore import QWebEngineDownloadRequest
     original_name = request.downloadFileName() or "download"
     kind = kind_for_path(original_name)
-    store = get_content_store()
+    store = library()
     path = store.new_path(kind, Path(original_name).suffix.lower())
     request.setDownloadDirectory(str(path.parent))
     request.setDownloadFileName(path.name)

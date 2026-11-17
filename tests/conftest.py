@@ -9,6 +9,7 @@
 #   - Requires: pytest, PySide6
 #   - Exposes: fixtures qapp, database, pump, wait_for
 # NOTES:
+#   - [2026-11-17] The engines' bus is shut down at the end of the run.
 #   - [2026-11-17] Tests use keyring's null backend and no provider API keys (Agents chat, Comms passwords).
 #   - [2026-11-16] qapp tears Qt WebEngine down in order at the end (the run exited with a segfault).
 #   - [2026-11-16] qapp prepares Qt WebEngine before creating the QApplication (browser page tests).
@@ -62,8 +63,10 @@ def qapp():
     app.setStyleSheet(STYLESHEET)
     yield app
     from app.ui.web_support import shutdown_web_engine
+    from engines.runtime import shutdown_engines
     for widget in QApplication.topLevelWidgets():
         widget.close()
+    shutdown_engines()
     shutdown_web_engine()
 
 

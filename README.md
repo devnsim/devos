@@ -8,6 +8,28 @@ Purpose:
 
 # Updates
 
+- **[2026-11-17] Engine plan, Phase 4: the Knowledge engine owns your Library.**
+  - **One owner:** notes, datasets, captures, CAD models, databases and every other file DevOS keeps for you are stored, found, renamed and deleted only by the Knowledge engine. Modules and tools ask it, and hear about changes the moment they happen.
+  - **Notes** and **Library** are now made of views: a list or any other view of your files, and a **Document** view (Markdown with live preview, autosaved; text files and datasets shown as text). Add more with *New view…*, for example a board of the Library grouped by kind.
+  - **Note links:** write `[[Another note]]` and the preview makes it a link; the new **Links** view draws your notes as a graph (notes you haven't written yet show as hollow dots).
+  - Library import tells you which files it couldn't import, and Settings → Engines marks Knowledge as a core engine that stays attached.
+- **[2026-11-17] Engine plan, Phase 3: docking.**
+  - **Engine packages:** each engine is a folder with an `engine.json`. DevOS finds them in `engines/` and in your data folder (`engine-packages/`).
+  - **Settings → Engines:** attach or detach any engine. Views that need a detached engine show a placeholder and come back when it returns, and its data is kept.
+  - **Conformance kit:** checks an engine before it docks (`python -m engines.kernel.conformance FOLDER`).
+  - **Bus inspector** (tool and button) shows requests, latency, queues and live messages.
+  - **Robustness:** requests time out, busy engines say so, and fast streams wait for slow screens.
+  - **Engines bring their own views.** `examples/engines/sample_data` shows how.
+- **[2026-11-17] Engine plan, Phase 2: views, shapes, view API.**
+  - **Data shapes:** ten standard formats (table, series, geo, tensor, image, point cloud, geometry, graph, document, thread), with big data sent as Apache Arrow.
+  - **Queries:** a standard way to ask for data (filter, search, sort, group, page); engines answer them.
+  - **Records engine:** Projects and Agents now store their records through it.
+  - **View runtime:** every view runs in a ViewHost. Selection is shared across the page, and any view can unlink. Views asking the same question share one answer.
+  - **New view…** opens a builder: choose the data, how to show it, its fields, a filter and a sort, with a live preview.
+  - **Data view:** a new module that puts any view on a page or a Canvas card.
+  - Existing pages keep their views.
+- **[2026-11-17] Engine plan, Phase 1: the kernel.** `engines/kernel/` holds the message bus that engines run on. Each engine runs on its own thread, handles one request at a time, and is started the first time something asks it. Messages are plain data, copied through JSON, so an engine can later move to another process or machine. Widgets talk to engines through `app/ui/engine_bridge.py`, and answers arrive on the UI thread. The Library module now lists and previews items through the new Knowledge engine.
+- **[2026-11-17] Engine plan, Phase 0: the safety net.** The plan to turn the modules into six engines with templates and user-built views lives in `docs/architecture/` (with a map of where every piece of data is kept). **Backups:** Settings → Data shows the data folder and backs it up on demand ("Back up data" in Ctrl+K too). Backups are consistent while DevOS runs and share unchanged files. A backup can be checked against its manifest and restored at the next start. DevOS also backs up by itself before it upgrades how existing data is stored. A frozen data folder from today's version (`tests/fixtures/data_v0`) must open in every future version, and `check_standard.py` keeps engines and the data layer free of Qt.
 - **[2026-11-17] Chat with agents, project forms, Part Design progress bar, n8n in the shell.**
   - **Agents:** *+ New agent* makes a Claude, Gemini or Ollama agent. The new **Chat** view talks to the selected agent and streams its answers; each agent keeps its own chats. The agent's Instructions are its system prompt. API keys stay in the system keyring (⚙ settings) or the usual environment variable; Ollama runs locally and needs no key.
   - **Records:** double-click a project on the board, timeline or calendar to open its form; right-clicking a record in any view offers *Open form*, *Duplicate* and *Delete*.
@@ -66,8 +88,21 @@ devos/
 │   ├── devos.svg                 # app icon
 │   └── icons/                    # sidebar + page icons (snake_case .svg)
 ├── AGENTS.md                     # START HERE: architecture, shared tools, recipes, rules (CLAUDE.md points here)
-├── tools/check_standard.py       # checks the code standard (headers, index, sections, dated notes, QSS)
+├── ROADMAP.md                    # where the project stands: current state, Now / Next / Later phases, direction, ideas
+├── CHANGELOG.md                  # what changed, per version
+├── docs/architecture/            # engine-plan.md (design: seven engines, shapes, protocol, contracts), data-ownership.md (what is stored where)
+├── tools/check_standard.py       # checks the code standard (headers, index, sections, dated notes, QSS, layer boundaries)
 ├── tests/                        # pytest suite (offscreen Qt, temporary database): python -m pytest -q
+│   └── fixtures/                 # data_v0: frozen data folder every version must open (+ make / check scripts)
+├── examples/engines/             # engine packages built outside DevOS: sample_data (+ README: how to build and dock one)
+├── engines/                      # ENGINES (no Qt): see docs/architecture/engine-plan.md; each has an engine.json
+│   ├── kernel/                   # messages, Engine base, InProcessHost (actor), Bus (requests, streams, events)
+│   ├── kernel/packages.py, conformance.py # engine packages (engine.json, discovery, loading); the conformance kit
+│   ├── runtime.py                # get_bus(), attach / detach (remembered), capability queries, add_package(); shutdown
+│   ├── kernel/shapes.py, query.py # data shapes v1 (+ Arrow) and Query v1 (docs/shapes.md)
+│   ├── toolkit/                  # shape toolkits: table.py (run_query), series.py (window, resample, decimate)
+│   ├── records/engine.py         # records engine (temporary until the Data engine): collections as Table shapes
+│   └── knowledge/                # Knowledge engine (core): engine.py (file service, source contract, note links), store.py (library/ + content_items)
 ├── core/                         # native C++20 engine (pybind11 extension "devos_core")
 │   ├── CMakeLists.txt
 │   ├── src/bindings.cpp          # the devos_core Python module (binds everything below)
@@ -87,20 +122,24 @@ devos/
 │   │   ├── __init__.py           # trace_segments(), synthesize_response(), HAS_NATIVE, self_test()
 │   │   ├── numpy_engine.py       # pure-NumPy mirror of the C++ functions
 │   │   └── build.py              # python -m app.native.build [--if-missing]
+│   ├── clients/library.py        # library(): the Library through the Knowledge engine (blocking, small calls)
 │   ├── data/                     # shared data layer (no Qt)
 │   │   ├── activity_log.py       # ActivityLog: global announcements (log.step), hooks, saved per session
 │   │   ├── tensor4d.py           # Tensor4D: 4D NumPy array with named axes + slicing
 │   │   ├── em_materials.py       # EM material library: permittivity / conductivity models, Fresnel
+│   │   ├── content_kinds.py      # Library kinds and their extensions, kind_for_path(), size_text()
 │   │   └── store/
 │   │       ├── database.py       # SQLite: migrations per namespace, module settings, layouts, preferences
-│   │       ├── content.py        # ContentStore: the user's files (notes, datasets, captures, CAD, databases, sheets …) in <data>/library/
 │   │       ├── pages.py          # PageStore: the user's pages (canvas / browser), folders, favourites
 │   │       ├── records.py        # RecordCollection: records with declared properties (agents, projects …)
+│   │       ├── backup.py         # backups of the data folder: create, check, restore at start-up, prune
 │   │       └── secrets.py        # passwords / API keys in the system keyring (never in SQLite)
 │   ├── modules/                  # MODULE APPS: each = view (UI) + engine (logic / C++) + store (SQLite)
 │   │   ├── registry.py           # MODULE_LIBRARY, ModuleSpec, ModuleContext, create_module()
 │   │   ├── base.py               # ModuleView: base class of every module view (settings, live loop, blocks)
-│   │   ├── records_module.py     # RecordsModule: base of record modules (toolbar + record views)
+│   │   ├── source_module.py      # SourceModule: a module made of views over one engine source + RecordFocus
+│   │   ├── records_module.py     # RecordsModule: SourceModule on a record collection (Projects, Agents)
+│   │   ├── data_view/            # Data view module: any view of any source as a page tile / Canvas card
 │   │   ├── agents/               # record module + chat: engine.py (Claude / Gemini / Ollama), store.py (chats), blocks.py (Chat), view.py
 │   │   ├── projects/             # record module: view.py
 │   │   ├── spreadsheet/          # formulas.py (no eval), engine.py (sheets, xlsx / csv, LibreOffice), view.py
@@ -114,8 +153,8 @@ devos/
 │   │   ├── wave_sim/             # RF wave simulator 1-10 GHz: physics.py, scene.py, engine.py, store.py, blocks.py, view.py
 │   │   ├── db_editor/            # Database Editor: engine.py (no Qt), view.py (toolbar + state), blocks.py, dialogs.py
 │   │   ├── graph/                # Graph tool: datasets.py (load / import / mock), view.py (plot + settings window)
-│   │   ├── notes/                # Markdown notes tool: view.py
-│   │   ├── library/              # content library browser: view.py
+│   │   ├── notes/                # Notes: views of the Knowledge engine's notes (list, document, links): view.py
+│   │   ├── library/              # Library: views of every Library item + import / export: view.py
 │   │   ├── trading_chart/        # Financial Chart: market_data.py, indicators.py, backtest.py, chart_items.py, store.py, view.py
 │   │   ├── tensor_inspector/     # generic 4D tensor viewer (waterfall + scatter blocks): view.py
 │   │   └── calendar/             # month calendar: view.py
@@ -124,9 +163,10 @@ devos/
 │       ├── main_window.py        # MainWindow: sidebar + tab workspace + status bar; Workspace (shared by all windows)
 │       ├── gl_support.py         # shared OpenGL probe for 3D views
 │       ├── ui_tools.py           # set_style_property(), control_label(), tool_button(), block helpers, run_in_thread()
+│       ├── engine_bridge.py      # call_engine() / stream_engine() / watch_engine(): engines from widgets, answers on the UI thread
+│       ├── bus_inspector.py      # Bus inspector: engines' requests, latency, queues; live messages
 │       ├── tool_bag.py           # ToolSpec registry, ToolBagPopup (search), global tools, active module
 │       ├── toolbars.py           # ToolDock / ToolTray: toolbars around every module tile
-│       ├── record_views.py       # RecordsController + table / board / timeline / calendar / form blocks
 │       ├── plot_tools.py         # styled_plot(), style_plot_item() for pyqtgraph
 │       ├── settings_dialog.py    # SettingsDialog: the separate settings window tools open from their gear
 │       ├── web_support.py        # Qt WebEngine: start-up flag, availability, browser profile, downloads -> Library
@@ -139,7 +179,7 @@ devos/
 │       │   ├── canvas_page.py          # CanvasPage: THE page template (editable title + Create New / module canvas)
 │       │   ├── browser_page.py         # BrowserPage: a page that is a web browser
 │       │   ├── infinite_canvas_page.py # InfiniteCanvasPage: "Canvas" page - module cards on an endless snapping grid
-│       │   └── placeholder_page.py     # PlaceholderPage: stand-in (used by Settings for now)
+│       │   └── settings_page.py        # SettingsPage: the gear's page (Data: data folder, backups)
 │       └── widgets/
 │           ├── sidebar.py        # Sidebar (collapsible navigation) + load_icon()
 │           ├── tab_area.py       # TabArea: tiling workspace of tab panes (nested splitters)
@@ -192,7 +232,37 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `page_selected` | Signal (`int`) | `Sidebar` | Emitted with the page index when an app is clicked. |
 | `page_stack` | UI element (`QStackedWidget`) | `TabGroup` | Shows the pane's selected page, or the empty-pane hint. |
 | `page_title_label / page_subtitle_label` | UI elements (`QLabel`) | Every page | Heading and grey sub-line at the top of a page; styled in `theme.py` [3.6]. |
-| `PlaceholderPage` | Class (`QWidget`) | `app/ui/pages/placeholder_page.py` | Stand-in page showing a title and subtitle until the real page is built. |
+| `SettingsPage` | Class (`QWidget`) | `app/ui/pages/settings_page.py` | The sidebar gear's page. Data section: the data folder, and backups (back up now, check, restore at next start). |
+| backup / `create_backup()` | Concept / function | `app/data/store/backup.py` | A copy of the data folder in `backups/<time>/` with a `backup.json` manifest (sizes, SHA-256, reason). SQLite is copied with the online backup API; unchanged files are hard-linked to the previous backup. `verify_backup()`, `prune_backups()`. |
+| safety backup | Concept | `app/data/store/backup.py`, `Database.migrate()` | A backup DevOS takes by itself before changing stored data (upgrading tables, restoring); its reason starts with "before". |
+| `schedule_restore()` / `apply_pending_restore()` | Functions | `app/data/store/backup.py` | Restore at the next start (`app.main`, before anything opens the data); the current state is backed up first. The command line refuses while DevOS holds `devos.lock`. |
+| data fixture (`data_v0`) | Test data | `tests/fixtures/` | A frozen data folder made by an older version; `check_data_fixture.py` reads it with the current app and `test_data_safety.py` compares the result with `data_v0.expected.json`. Never regenerate an existing fixture. |
+| layer boundary | Concept | `tools/check_standard.py` (`BOUNDARIES`) | `engines/` and `app/data/` never import PySide6, `app.ui`, `app.modules` or `app.views` (lazy imports included). |
+| engine (plan) | Concept | `docs/architecture/engine-plan.md` | A self-contained, dockable core with no Qt that owns its data and talks only through messages: Knowledge, Data, Spatial, Simulation, Signals, Conversation, Services. |
+| roadmap | Document | `ROADMAP.md` | The future-facing changelog: current state, Now / Next / Later (the phases), Done, direction, future ideas, open questions. Updated every session; `check_standard.py` warns when it isn't. |
+| data shape | Concept | `docs/architecture/engine-plan.md` | The common data format on every connection (sources → engines → views): Table, Series, Geo, Tensor, Image, PointCloud, Geometry, Graph, Document, Thread; big data as Arrow attachments. |
+| `Engine` / `EngineManifest` / `RequestSpec` | Classes | `engines/kernel/` | An engine: a manifest (requests with their effect, events, shapes, data it owns) and one `on_<request>(payload, job)` handler per request (dict or `Reply` with attachments; streaming handlers yield). `start()` / `stop()` run on its thread; `emit()`, `log()`. |
+| `Message` | Class | `engines/kernel/messages.py` | What crosses between engines and DevOS: kind (event, request, reply, stream_item, stream_end, error, cancel), topic `engine.name`, JSON payload (always copied through JSON), binary attachments. |
+| `Bus` | Class | `engines/kernel/bus.py` | `request()` → Future, `call()` (blocking), `stream()` → handle with `cancel()`, `subscribe()` / `publish()` events; starts engine hosts on first use. The app's bus: `engines.runtime.get_bus()`. |
+| `InProcessHost` | Class | `engines/kernel/hosts.py` | Runs an engine as an actor on its own thread: requests checked against the manifest, handled one at a time in order; failures become `EngineError`. Later hosts: subprocess, k3s worker. |
+| `EngineError` | Exception | `engines/kernel/messages.py` | An engine failure with a user-facing message, a `code` (unknown_request, bad_request, not_found, cancelled, internal …) and details for the log. |
+| `call_engine()` / `stream_engine()` / `watch_engine()` | Functions | `app/ui/engine_bridge.py` | How widgets use engines: answers, stream items and events arrive on the UI thread, and never for a deleted widget. |
+| engine package / `engine.json` | Concept / file | `engines/kernel/packages.py` | A folder with `engine.json` (id, title, version, entry, kernel_api, requires, uses, views) and the engine's code; discovered in `engines/` and `<data>/engine-packages/` without running it. |
+| attach / detach | Concept | `engines/runtime.py`, Settings → Engines | Switch an engine on or off (remembered). Detached: its views show a placeholder and keep their settings, its data is kept; `requires` is checked both ways. |
+| capability query | Function | `engines/runtime.py` | `producers(shape)`, `answering(request)`, `sources()`: what the attached engines can do. |
+| conformance kit | Tool | `engines/kernel/conformance.py` | The standard checks an engine passes before it docks; `python -m engines.kernel.conformance FOLDER`. |
+| back-pressure / credit | Concept | `engines/kernel/bus.py`, `engine_bridge.stream_engine(window, latest)` | A stream with a window pauses the engine until the receiver acknowledges items; `latest=True` shows only the newest. |
+| Bus inspector | Window / tool | `app/ui/bus_inspector.py` | Per-engine requests, errors, timeouts, latency, queue depth, and the live messages (tap only while open). |
+| `KnowledgeEngine` | Class (`Engine`) | `engines/knowledge/engine.py` | Engine id `knowledge`, a core engine: the only owner of the Library. File service (list, item, read_text, search, create_text, add_file, add_bytes, write_text, rename, export, path / new_path / register_path, unique_name, refresh_size), the source contract (`library` + one table per kind) and `links`; `changed` events. |
+| core engine | Concept | `engine.json` `"core": true`, `engines/runtime.py` | An engine DevOS keeps attached (Knowledge): `detach()` refuses it and Settings → Engines shows "· core". |
+| `library()` / `LibraryClient` / `LibraryItem` / `LibraryError` | Function / classes | `app/clients/library.py` | How modules and tools use the Library: small blocking calls over the bus with the old store's names; items are plain data (ask `path()` for a file). |
+| `watch_library()` | Function | `app/ui/engine_bridge.py` | `on_change(kind)` on the UI thread whenever the Library changes (`knowledge.changed`). |
+| `ContentStore` | Class | `engines/knowledge/store.py` | Knowledge's internal store: files in `<data dir>/library/<kind>/`, indexed in `content_items`. Only the engine uses it. |
+| `SourceModule` | Class (`ModuleView`) | `app/modules/source_module.py` | A module made of views over one engine source (`SOURCE`, `NOUN`, `VIEWS`, `DEFAULT_LAYOUT`; hooks `block_definition()`, `toolbar_start()`, `record_actions()` …). Notes, Library and `RecordsModule` use it. |
+| `DocumentView` | View type `document` | `app/views/types/document.py` | The selected Library item: Markdown editor + preview (Edit / Split / Preview, autosave, `[[links]]` followable); other text read-only; anything else as details. Needs `read_text` / `write_text`. |
+| `LinksView` | View type `links` | `app/views/types/links.py` | Notes as a graph, a line per `[[link]]`; click selects, double-click opens. Needs `links`. |
+| `ViewType.requests` / `host.request()` | Field / method | `app/views/api.py`, `app/views/host.py` | Requests a view needs from its source engine besides the query; the builder hides views their data can't serve. `host.request(name, payload, on_reply)` asks them. |
+| `LIBRARY_VIEWS` | Constant (tuple) | `app/views/types/__init__.py` | Built-in view types for Library sources: `document`, `links`. |
 | `*_PX (theme)` | Constants (`int`, px) | `app/ui/theme.py` [2.2] | Shared size tokens: `BASE_FONT_SIZE_PX`, `CORNER_RADIUS_PX`. |
 | `*_QSS` | Constants (`str`) | `app/ui/theme.py` [3.x] | One group of style rules per widget kind. |
 | `select_page()` | Method | `Sidebar` | Highlights a page in Favorites and All Pages from code (opens its folders). |
@@ -243,14 +313,13 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `ActivityLog` / `get_activity_log()` | Class / function | `app/data/activity_log.py` | The System Log: `info` / `success` / `warning` / `error`, `step(source, action)` (announces success or FAILED + details), listeners, saved per session to SQLite (`log_sessions`, `log_entries`). |
 | `LogPanel` | Class (`QWidget`) | `app/ui/widgets/log_panel.py` | System Log view docked under the tab area: session, level, source and text filters, auto-scroll, copy. Opened by `status_log_btn`. |
 | `status_log_btn` | UI element (`QToolButton`) | `SystemStatusBar` | "▤ Log" tile: toggles the log panel; shows "⚠ N" for unseen warnings / errors. |
-| `ContentStore` / `get_content_store()` | Class / function | `app/data/store/content.py` | The user's content library: files in `<data dir>/library/<kind>/`, indexed in `content_items`; create, read, write, rename, delete, import, export. |
-| content kind | Concept (`str`) | `CONTENT_KINDS` | `note`, `dataset`, `capture`, `cad`, `database`, `graph`, `sheet`, `geo`, `image`, `file`. |
+| content kind | Concept (`str`) | `CONTENT_KINDS` (`app/data/content_kinds.py`) | `note`, `dataset`, `capture`, `cad`, `database`, `graph`, `sheet`, `geo`, `image`, `file`. |
 | preferences | Concept | `Database.get_preference()` / `set_preference()` | User-level settings (JSON) in `user_preferences`, e.g. `log_panel_open`. |
 | `SettingsDialog` | Class (`QDialog`) | `app/ui/settings_dialog.py` | Separate, non-modal settings window with tabs and Apply / OK / Close; signal `applied`. |
 | `GraphModule` | Class (`ModuleView`) | `app/modules/graph/view.py` | 2D graph tool; gear opens data (datasets, import CSV, mock) and appearance settings. |
 | `Dataset` / `make_mock()` | Class / function | `app/modules/graph/datasets.py` | Table of numbers from a library CSV / generated mock data (`MOCK_GENERATORS`). |
-| `NotesModule` | Class (`ModuleView`) | `app/modules/notes/view.py` | Markdown notes: pick / create / rename / delete, Edit / Split / Preview, autosave. |
-| `LibraryModule` | Class (`ModuleView`) | `app/modules/library/view.py` | Browser for the content library: filter by kind, rename, import, export, delete, preview. |
+| `NotesModule` | Class (`SourceModule`) | `app/modules/notes/view.py` | Views of the notes (list + document by default, links on request); + New note; remembers the selected note (`note_id`) and the editor mode. |
+| `LibraryModule` | Class (`SourceModule`) | `app/modules/library/view.py` | Views of every Library item (table + document by default; any view by *New view…*); Import… / Export…; rename and delete through the views. |
 | page kind | Concept (`str`) | `app/data/store/pages.py` | `"canvas"` (tiled modules, `CanvasPage`), `"browser"` (`BrowserPage`) or `"infinite_canvas"` (`InfiniteCanvasPage`, shown as "Canvas"); pages also keep a small JSON state (`page_state()`). |
 | Create New panel | UI element (`create_new_panel`) | `CanvasPage` | What an empty page shows: New Module / New Browser / New Canvas (`kind_requested` → `MainWindow.convert_page()`). |
 | `InfiniteCanvasPage` / `InfiniteCanvas` | Classes (`QWidget`) | `app/ui/pages/infinite_canvas_page.py` | The "Canvas" page: an endless dotted grid (`GRID_PX` per cell at 100 %). Pan by dragging the grid or scrolling, Ctrl+scroll zooms, Fit, double-click adds a card. Cards, cells and the view are saved under the page's canvas key. |
@@ -284,15 +353,24 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `empty_tab_label` | UI element (`QLabel`) | `TabGroup` | Hint in an empty pane: "Pick a page from the sidebar" (one pane) or "Drag a page here" (split). |
 | record / `RecordCollection` | Concept / class | `app/data/store/records.py` | "Every line is a record with properties": records of one collection in SQLite (JSON values); `get_collection(name, defaults)` shares one per name; users can add properties. |
 | `PropertySpec` | Class | `app/data/store/records.py` | One declared property: key, title, kind (text, long_text, number, select, multi_select, date, checkbox, url), options. |
-| view (record view) | Concept | `app/ui/record_views.py` | One picture of the same records: `TableBlock`, `BoardBlock`, `TimelineBlock` (Gantt), `CalendarBlock`, `FormBlock`; shared selection / search via `RecordsController`. |
-| `RecordsModule` | Class (`ModuleView`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`, optional `NEW_RECORD_PRESETS`; hooks `extra_block_specs()`, `record_actions()`); `AgentsModule`, `ProjectsModule` use it. |
+| view / view type | Concept | `app/views/` (`types/`: table, board, timeline, calendar, form, document, links) | One way of drawing data of a shape. A view type declares the shapes it draws and its mapping slots; `register_view_type()`. Contract: `docs/views-api.md`. |
+| `ViewHost` | Class (`QWidget`) | `app/views/host.py` | The frame of every view: definition, data (shared subscription), page channels, writes to the engine, record and view menus; a block, a page tile or a Canvas card. |
+| view definition | Concept | `app/views/api.py` | The saved recipe of a view: view type, source, query, mapping, presentation, channels. `make_definition()`, `upgrade_definition()` (old block settings included). |
+| `ChannelHub` / channel | Class / concept | `app/views/channels.py` | Page-wide shared cursors (one hub per page); selection per source; a view can unlink. |
+| shared subscription | Concept | `app/views/subscriptions.py` | Views asking the same question of the same source share one engine request and its answer; a `<engine>.changed` event refreshes them. |
+| view builder | Dialog | `app/views/builder.py` | New view… / Edit view…: data, view type, mapping, filter, sort, name, live preview. |
+| `RecordsEngine` | Class (`Engine`) | `engines/records/engine.py` | Engine id `records` (temporary until the Data engine): record collections as Table shapes; the only writer of records. |
+| `RecordFocus` | Class | `app/modules/source_module.py` | The page's selected record of a source, fetched from the engine (Agents chat, Notes, exports). |
+| `DataViewModule` | Class (`ModuleView`) | `app/modules/data_view/view.py` | "Data view": any view of any source as a page tile or Canvas card. |
+| Query v1 | Contract | `engines/kernel/query.py` | The question a view asks: filter tree, search, sort, group + aggregates, paging, time range, extent. `run_query()` in `engines/toolkit/table.py`. |
+| `RecordsModule` | Class (`SourceModule`) | `app/modules/records_module.py` | Base of record modules (set `COLLECTION`, `NOUN`, `PROPERTIES`, `DEFAULT_LAYOUT`, optional `NEW_RECORD_PRESETS`; hooks `extra_block_specs()`, `record_actions()`); `AgentsModule`, `ProjectsModule` use it. |
 | `agent_definition()` | Function | `app/modules/agents/view.py` | An agent record as Markdown with front matter (name, description, model, tools from permissions) + instructions. |
 | provider | Concept | `app/modules/agents/engine.py` | Who runs an agent's model: Claude (Anthropic API), Gemini (Google AI API) or Ollama (local server). The agent's Provider property; `provider_of()` guesses it for older agents. |
 | `stream_chat()` / `ChatConfig` | Function / class | `app/modules/agents/engine.py` | One chat turn with a provider, streamed piece by piece; failures become `AgentError` with a message the user can act on. `chat_config()` turns an agent record into a `ChatConfig`. |
 | `ChatStore` / conversation | Class / concept | `app/modules/agents/store.py` | An agent's chats (`agents_conversations`, `agents_messages`); `get_chat_store()` shares one per database. Deleting an agent keeps its chats. |
 | `ChatBlock` | Class (block) | `app/modules/agents/blocks.py` | The Agents module's Chat view: follows the selected agent, switches its provider / model, streams answers, lists / saves / deletes chats. |
 | `get_secret()` / `set_secret()` | Functions | `app/data/store/secrets.py` | Secrets (Comms passwords, Agents API keys) in the system keyring; session memory when there is no keyring. `secret_storage()` says where they go. |
-| `open_form()` / `record_menu()` | Methods | `RecordsController` (`app/ui/record_views.py`) | Double-click a record → `open_form()` → `form_requested`; right-click a record in any view → `record_menu()` (Open form, module `record_actions`, Duplicate, Delete). |
+| `open_record()` / `record_menu()` | Methods | `ViewHost` (`app/views/host.py`) | Double-click a record → `open_record()` (the module's form block, or a small linked form window); right-click → `record_menu()` (Open form, module `record_actions`, Duplicate, Delete). |
 | `show_block()` | Method | `BlockCanvas` (`app/ui/canvas/block_canvas.py`) | Bring a block of a kind forward, or open one beside the active block. |
 | `StepProgressBar` | Class (`QWidget`) | `app/ui/widgets/step_bar.py` | A workflow's steps as numbered circles on a filling line (current / done / open / locked); Part Design's top bar. |
 | tool / `ToolSpec` | Concept / class | `app/ui/tool_bag.py` | A small action (glyph, title, description, `run(module_view)`); global, or bound to one module type (`module_type_id`). `register_tools()`, `tools_for()`, `search_tools()`. |

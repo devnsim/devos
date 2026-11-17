@@ -1,0 +1,9 @@
+{
+  "id": "sample_data",
+  "title": "Sample data",
+  "version": "1.0",
+  "summary": "Made-up orders to try views and docking with; ships its own Totals view.",
+  "entry": "engine:SampleDataEngine",
+  "views": "views",
+  "kernel_api": 1
+}

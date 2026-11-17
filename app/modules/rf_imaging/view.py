@@ -17,6 +17,7 @@
 #              load_capture(item_id); refresh_views(); set_time_step(); set_selected_voxel(); attributes
 #              sensor, pipeline, capture, selected_voxel, block_canvas
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-15] Created. Heavy setup (steering matrices, ~0.5 s / ~80 MB) waits until the module is
 #                  first shown, so app start-up stays fast.
 #   - [2026-11-15] Raw frames are recorded (not images) so saved tests can be re-processed later with
@@ -72,7 +73,7 @@ from PySide6.QtWidgets import (
 
 from app.data.em_materials import NO_MATERIAL_ID
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.modules.rf_imaging.blocks import (
@@ -244,20 +245,20 @@ class RfInspectorModule(ModuleView):
         if self.capture is None or self.capture.frame_count == 0:
             self.log.warning("rf_imaging", "Nothing recorded yet to save")
             return
-        library = get_content_store()
-        name = library.unique_name("capture", time.strftime("RF test %Y-%m-%d %H:%M"))
+        store = library()
+        name = store.unique_name("capture", time.strftime("RF test %Y-%m-%d %H:%M"))
         self.capture.metadata["saved_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         with self.log.step("rf_imaging", f"Save {self.capture.frame_count:,} frames as “{name}”"):
-            path = self.capture.save(library.new_path("capture", ".npz"))
-            library.register_path("capture", name, path, {"frames": self.capture.frame_count,
+            path = self.capture.save(store.new_path("capture", ".npz"))
+            store.register_path("capture", name, path, {"frames": self.capture.frame_count,
                                                           "source": self.sensor.description,
                                                           "sweep": self.capture.config.to_dict()})
 
     def _fill_load_menu(self) -> None:
         """Captures in the user's library, newest first, then import from a file."""
         self.load_capture_menu.clear()
-        library = get_content_store()
-        captures = library.items("capture")[:12]
+        store = library()
+        captures = store.items("capture")[:12]
         for item in captures:
             saved_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.created_at))
             frames = item.metadata.get("frames")
@@ -271,19 +272,19 @@ class RfInspectorModule(ModuleView):
     def _on_import_capture(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(self, "Import RF capture", "", "RF capture (*.npz)")
         if file_path:
-            item = get_content_store().add_file("capture", file_path)
+            item = library().add_file("capture", file_path)
             self.load_capture(item.item_id)
 
     def load_capture(self, item_id: int) -> None:
         """Replay a capture from the user's library."""
-        library = get_content_store()
-        item = library.get(item_id)
+        store = library()
+        item = store.get(item_id)
         if item is None:
             self.log.warning("rf_imaging", f"Capture #{item_id} is no longer in the library")
             return
         try:
             with self.log.step("rf_imaging", f"Load capture “{item.name}”"):
-                capture = RfCapture.load(library.path(item))
+                capture = RfCapture.load(store.path(item))
         except (OSError, ValueError, KeyError):
             return                                           # step() logged the reason
         self.set_sensor(CaptureReplaySensor(capture, item.name))

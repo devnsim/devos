@@ -18,6 +18,7 @@
 #              set_title(title); start_title_edit(); add_first_module(); module_canvas; create_new_panel;
 #              page_id; PageTitleEdit
 # NOTES:
+#   - [2026-11-17] Has a channel_hub (app.views.channels): views on this page share their selection.
 #   - [2026-11-17] "New Canvas" on the Create New panel (an infinite canvas page). browser_requested() became
 #                  kind_requested(page kind), one signal for every "turn this page into ..." button.
 #   - [2026-11-16] The canvas shows as soon as it holds a tile, however it got there (not only via New Module).
@@ -54,6 +55,7 @@ from app.data.store.database import Database
 from app.data.store.pages import PAGE_KIND_BROWSER, PAGE_KIND_INFINITE_CANVAS, canvas_key
 from app.ui.canvas.module_canvas import ModuleCanvas
 from app.ui.widgets.sidebar import load_icon
+from app.views.channels import ChannelHub
 # --- END [1.1] ---
 
 
@@ -117,6 +119,7 @@ class CanvasPage(QWidget):
     def __init__(self, page_id: int, title: str, database: Database) -> None:
         super().__init__(objectName="canvas_page_panel")
         self.page_id = page_id
+        self.channel_hub = ChannelHub(self)           # page-wide channels: every view on this page links here
         layout = QVBoxLayout(self)
         layout.setContentsMargins(self.PAGE_MARGIN_PX, self.PAGE_MARGIN_PX, self.PAGE_MARGIN_PX, self.PAGE_MARGIN_PX)
         layout.setSpacing(self.SECTION_SPACING_PX)

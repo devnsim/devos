@@ -14,6 +14,8 @@
 #               assets/devos.svg, devos.desktop (created by the install script)
 #   - Exposes: main() -> int (process exit code)
 # NOTES:
+#   - [2026-11-17] Engines (engines.runtime) are shut down at exit.
+#   - [2026-11-17] Start-up applies a restore chosen in Settings, then holds the data folder's running lock.
 #   - [2026-11-16] Shuts Qt WebEngine down in order after the event loop (no segfault on quit).
 #   - [2026-11-16] prepare_web_engine() runs before QApplication so browser pages (Qt WebEngine) work.
 #   - [2026-11-14] Reformatted to the file standard; ICON renamed to APP_ICON_PATH,
@@ -75,11 +77,25 @@ def _qt_message_handler(message_type, context, message: str) -> None:
         getattr(get_activity_log(), level)("qt", message)
 
 
+def _restore_and_lock_data(log) -> None:
+    """A restore chosen in Settings runs now, while nothing holds the data open; then the data folder is
+    marked as in use so a command-line restore can't replace it under a running DevOS."""
+    from app.data.store.backup import BackupError, apply_pending_restore, hold_running_lock
+    try:
+        apply_pending_restore()
+    except (BackupError, OSError) as error:
+        log.error("backup", "Restoring the chosen backup failed; the state before it is in Settings → Data → Backups",
+                  error)
+    if not hold_running_lock():
+        log.warning("devos", "Another DevOS seems to be using the same data folder")
+
+
 def main() -> int:
     log = get_activity_log()
     log.install_hooks()                              # unhandled errors -> System Log
     qInstallMessageHandler(_qt_message_handler)
     log.info("devos", f"DevOS starting (Python {sys.version.split()[0]})")
+    _restore_and_lock_data(log)                      # before anything opens the data folder
 
     from app.ui.web_support import prepare_web_engine, shutdown_web_engine
     prepare_web_engine()                             # before QApplication (browser pages)
@@ -112,6 +128,8 @@ def main() -> int:
 
     exit_code = app.exec()
     main_window.close()
+    from engines.runtime import shutdown_engines
+    shutdown_engines()                     # engines close their stores on their own threads
     shutdown_web_engine()                  # pages before profiles, or Qt WebEngine crashes on exit
     log.end_session()
     return exit_code

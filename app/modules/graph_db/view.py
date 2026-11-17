@@ -9,12 +9,13 @@
 #      click to inspect, labels), Inspector (properties of the selected element).
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.modules.graph_db.engine, kuzu (optional), networkx,
-#               pyqtgraph, app.data.store.content, app.ui (ui_tools, plot_tools, tool_bag, canvas, theme),
+#               pyqtgraph, app.clients.library, app.ui (ui_tools, plot_tools, tool_bag, canvas, theme),
 #               QSS selectors #graph_db_panel, #cypher_editor
 #   - Exposes: GraphDbModule(parent=None, context=None) with graph_db, item_id, open_item(), new_database(),
 #              run_query(text), show_graph(sample), select_element(element); SchemaBlock, CypherBlock,
 #              GraphViewBlock, InspectorBlock
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (KuzuDB graph database view).
 # ==============================================================================
 
@@ -58,7 +59,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.modules.graph_db.engine import (
     KUZU_TYPES, GraphDb, GraphDbError, GraphSample, describe, element_key, is_node, is_rel, kuzu_unavailable_reason,
@@ -69,6 +70,7 @@ from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.theme import BACKGROUND_COLOR, EDGE_COLOR, MUTED_TEXT_COLOR, TAG_COLORS, TEXT_COLOR
 from app.ui.tool_bag import ToolSpec, register_tools
 from app.ui.ui_tools import add_button, block_layout, control_label, fit_columns, set_status, status_label
+from app.ui.engine_bridge import watch_library
 
 HISTORY_SIZE = 30
 DEFAULT_BLOCKS = {"split": "h", "sizes": [1, 4], "children": [
@@ -428,7 +430,7 @@ class GraphDbModule(ModuleView):
     def __init__(self, parent: QWidget | None = None, context=None) -> None:
         super().__init__(parent, context, "graph_db_panel")
         self.log = get_activity_log()
-        self.store = get_content_store()
+        self.store = library()
         self.graph_db: GraphDb | None = None
         self.item_id: int | None = None
         self.graph_sample = GraphSample()
@@ -467,8 +469,7 @@ class GraphDbModule(ModuleView):
             BlockSpec("inspector", "Inspector", "Properties of the clicked node", lambda: InspectorBlock(self)),
         ], DEFAULT_BLOCKS)
         layout.addWidget(self.block_canvas, 1)
-        self.store.add_listener(self._on_content_changed)
-        self.destroyed.connect(lambda *_: self.store.remove_listener(self._on_content_changed))
+        watch_library(self, self._on_content_changed)
         self._fill_combo()
         saved_id = self.setting("item_id")
         if saved_id is not None and self.store.get(saved_id) is not None:

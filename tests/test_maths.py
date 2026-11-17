@@ -10,6 +10,7 @@
 #   - Requires: numpy, trimesh, app.native, app.modules (trading_chart, rf_imaging, wave_sim), app.data
 #   - Exposes: pytest tests
 # NOTES:
+#   - [2026-11-17] The mock feed test compares bars by open time (it failed when a minute boundary fell between calls).
 #   - [2026-11-15] Created in the health pass from the checks run while building each engine.
 # ==============================================================================
 
@@ -89,8 +90,9 @@ def test_backtest_matches_hand_calculation():
 def test_mock_feed_is_deterministic_and_consistent():
     from app.modules.trading_chart.market_data import MockBitcoinFeed
     first, second = MockBitcoinFeed().history(3), MockBitcoinFeed().history(3)
-    count = min(len(first), len(second)) - 2
-    assert np.array_equal(first.close[:count], second.close[:count])
+    shared, first_index, second_index = np.intersect1d(first.time[:-1], second.time[:-1], return_indices=True)
+    assert len(shared) > 100                                         # compared bar by bar at the same open time,
+    assert np.array_equal(first.close[first_index], second.close[second_index])   # even across a minute boundary
     assert np.all(first.high >= np.maximum(first.open, first.close))
     assert np.all(first.low <= np.minimum(first.open, first.close))
 # --- END [1.2] ---

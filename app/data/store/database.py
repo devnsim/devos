@@ -13,6 +13,7 @@
 #   - Exposes: Database (get_preference, set_preference, delete_layout, ...), get_database(), data_directory(), ModuleSettings,
 #              array_to_blob(), blob_to_array()
 # NOTES:
+#   - [2026-11-17] migrate() takes a safety backup (app.data.store.backup) before upgrading tables that hold data.
 #   - [2026-11-15] Created. Location: $DEVOS_DATA_DIR, else $XDG_DATA_HOME/devos, else
 #                  ~/.local/share/devos; file devos.sqlite3. Tests set DEVOS_DATA_DIR to a temp folder.
 #   - [2026-11-15] One connection, used from the Qt (main) thread only. Writes commit immediately
@@ -122,6 +123,7 @@ class Database:
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path) if path else data_directory() / DATABASE_FILE_NAME
+        self._has_safety_backup = False
         self.connection = sqlite3.connect(self.path, isolation_level=None)   # autocommit; use transaction()
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
@@ -136,8 +138,12 @@ class Database:
         return row["version"] if row else 0
 
     def migrate(self, namespace: str, migrations: list[str]) -> None:
-        """Apply migrations[current_version:] for this namespace, each in its own transaction."""
+        """Apply migrations[current_version:] for this namespace, each in its own transaction. Upgrading
+        tables that already hold data (the user's own data folder) takes a safety backup first; if the
+        backup fails, nothing is migrated (BackupError)."""
         current_version = self.schema_version(namespace)
+        if 0 < current_version < len(migrations):
+            self._back_up_before_migrating(namespace, len(migrations))
         for version, script in enumerate(migrations[current_version:], start=current_version + 1):
             get_activity_log().info("database", f"Migrating '{namespace}' tables to version {version}")
             with self.transaction():
@@ -149,6 +155,13 @@ class Database:
                     "ON CONFLICT(namespace) DO UPDATE SET version = excluded.version",
                     (namespace, version),
                 )
+
+    def _back_up_before_migrating(self, namespace: str, target_version: int) -> None:
+        if self._has_safety_backup or self.path.resolve() != (data_directory() / DATABASE_FILE_NAME).resolve():
+            return                                     # once per run, and only for the user's data folder
+        from app.data.store.backup import create_backup     # lazy: backup imports this module
+        create_backup(reason=f"before migrating {namespace} to version {target_version}", data_dir=self.path.parent)
+        self._has_safety_backup = True
 
     def close(self) -> None:
         self.connection.close()

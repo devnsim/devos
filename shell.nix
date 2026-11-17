@@ -28,7 +28,8 @@ let
     networkx    # graph layouts for the graph database view
     kuzu        # embedded graph database (Graph DB module)
     openpyxl    # .xlsx read / write for the Spreadsheet module (LibreOffice handles .ods / .xls)
-    keyring     # system keyring for Comms account passwords (never stored in SQLite)
+    keyring     # system keyring for Comms passwords and Agents API keys (never stored in SQLite)
+    pyarrow     # Apache Arrow: binary encoding of big data shapes between engines and views (engine plan)
     pytest      # tests/ (python -m pytest -q)
   ]);
 in

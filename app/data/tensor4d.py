@@ -6,11 +6,13 @@
 #   2. Slices by axis name: take(), volume(), plane(), line(), value(), window(), reduce().
 #   3. Builds the views the inspector draws: waterfall() (time x one axis) and to_points() (3D scatter).
 #   4. Streams: push() appends a new frame along the first axis, dropping the oldest (fixed memory).
-#   5. Provides a demo source (wave_frame / Tensor4D.demo) and inspect() to open the live inspector.
+#   5. Provides a demo source (wave_frame / Tensor4D.demo).
 # CONTRACT:
-#   - Requires: numpy. No Qt import at module level (inspect() imports the UI lazily).
+#   - Requires: numpy. No Qt.
 #   - Exposes: Tensor4D (class), wave_frame(spatial_shape, phase) -> ndarray, DEFAULT_AXIS_NAMES
 # NOTES:
+#   - [2026-11-17] inspect() removed (unused; it reached into a Qt module from the data layer). Use
+#                  app.modules.tensor_inspector.view.launch_inspector(tensor) instead.
 #   - [2026-11-15] Created for the Project Editor's Tensor Inspector module. Methods return plain
 #                  NumPy arrays (views where NumPy allows) so callers can use any NumPy tool on them.
 #   - [2026-11-15] push() shifts the buffer in place (memmove) instead of np.roll, which would
@@ -38,7 +40,7 @@
 #    2.4 reductions_and_windows
 #    2.5 inspector_views
 #    2.6 streaming
-#    2.7 demo_and_inspect
+#    2.7 demo
 # 3. DEMO_SOURCE
 #    3.1 wave_frame
 # ==============================================================================
@@ -236,7 +238,7 @@ class Tensor4D:
 # --- END [2.6] ---
 
 # ==============================================================================
-# [2.7] demo_and_inspect
+# [2.7] demo
 # ==============================================================================
     @classmethod
     def demo(cls, shape: tuple[int, int, int, int] = (96, 24, 24, 24)) -> Tensor4D:
@@ -244,11 +246,6 @@ class Tensor4D:
         step_count, *spatial_shape = shape
         frames = [wave_frame(tuple(spatial_shape), step) for step in range(step_count)]
         return cls(np.stack(frames).astype(np.float32))
-
-    def inspect(self, title: str = "Tensor Inspector"):
-        """Open the live inspector in its own window (needs a running QApplication)."""
-        from app.modules.tensor_inspector.view import launch_inspector   # lazy: keeps numpy-only import
-        return launch_inspector(self, title)
 # --- END [2.7] ---
 
 

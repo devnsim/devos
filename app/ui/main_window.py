@@ -16,7 +16,7 @@
 #      all windows: opening it anywhere brings its window forward.
 # CONTRACT:
 #   - Requires: app.data.store (database.get_database, pages.PageStore), app.ui.pages (CanvasPage,
-#               BrowserPage, InfiniteCanvasPage, PlaceholderPage), app.ui.widgets.tab_group (PAGE_MIME_TYPE,
+#               BrowserPage, InfiniteCanvasPage, SettingsPage), app.ui.widgets.tab_group (PAGE_MIME_TYPE,
 #               note_tab_drag_over_window), app.ui.widgets (sidebar.Sidebar, tab_area.TabArea, title_bar,
 #               status_bar.SystemStatusBar), assets/icons (sidebar_open, page, settings .svg),
 #               QSS selector #open_sidebar_btn
@@ -27,6 +27,7 @@
 #              SETTINGS_PAGE_ID; Workspace with windows, open_in_new_window(page_id, source, at_cursor),
 #              window_with_page(page_id)
 # NOTES:
+#   - [2026-11-17] The Settings page is SettingsPage (Data: data folder, backups) instead of a placeholder.
 #   - [2026-11-17] Several windows: Workspace (shared page store, page widgets, parked pages, log flush);
 #                  "Open in new window" / dragging a tab out of every window opens it in a new MainWindow;
 #                  renames, deletions and new pages reach every window's sidebar and tabs; a closing window
@@ -186,7 +187,7 @@ from app.data.store.pages import (
 from app.ui.pages.browser_page import BrowserPage
 from app.ui.pages.canvas_page import CanvasPage
 from app.ui.pages.infinite_canvas_page import InfiniteCanvasPage
-from app.ui.pages.placeholder_page import PlaceholderPage
+from app.ui.pages.settings_page import SettingsPage
 from app.ui.tool_bag import ToolBagPopup, active_module, note_pressed
 from app.ui.widgets.sidebar import ICON_SIZE, Sidebar, load_icon
 from app.ui.widgets.log_panel import LogPanel
@@ -346,7 +347,7 @@ class MainWindow(QMainWindow):
         """Build a page the first time it is opened (in any window): the class its kind asks for."""
         if page_id not in self.page_widgets:
             if page_id == self.SETTINGS_PAGE_ID:
-                widget = PlaceholderPage("Settings", "Configuration options.")
+                widget = SettingsPage()
             else:
                 page = self.page_store.page(page_id)
                 with get_activity_log().step("pages", f"Open page “{self.page_title(page_id)}”"):

@@ -11,10 +11,12 @@
 #      tools mapped from permissions, then the instructions) into the Library.
 # CONTRACT:
 #   - Requires: app.modules.records_module.RecordsModule, app.modules.agents (engine, blocks),
-#               app.data.store.records, app.data.store.content, app.ui.settings_dialog, app.ui.tool_bag
+#               app.data.store.records, app.clients.library, app.ui.settings_dialog, app.ui.tool_bag
 #   - Exposes: AgentsModule(parent=None, context=None) with base_urls(), open_settings(), show_chat();
 #              AGENT_PROPERTIES, agent_definition(record) -> str, PERMISSION_TOOLS, OLLAMA_URL_PREFERENCE
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
+#   - [2026-11-17] Uses module.focus (records engine) instead of the removed RecordsController.
 #   - [2026-11-17] Chat: Provider property (Claude / Gemini / Ollama), Max output tokens, + New agent menu, a Chat
 #                  view, Chat with agent in every view's record menu, ⚙ settings for API keys and Ollama.
 #   - [2026-11-16] Created. Agents are only defined here (no runtime yet): running them belongs to the
@@ -48,7 +50,7 @@ import re
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton
 
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.data.store.database import get_database
 from app.data.store.records import PropertySpec, Record
 from app.data.store.secrets import secret_storage
@@ -137,7 +139,7 @@ class AgentsModule(RecordsModule):
 
     def show_chat(self, record_id: int | None = None) -> None:
         if record_id is not None:
-            self.controller.select(record_id)
+            self.focus.select(record_id)
         chat = self.block_canvas.show_block("chat")
         chat.chat_input_edit.setFocus()
 
@@ -158,12 +160,12 @@ class AgentsModule(RecordsModule):
         row.addWidget(export_btn)
 
     def export_agent_file(self) -> None:
-        record = self.controller.selected()
+        record = self.focus.selected()
         if record is None:
             set_status(self.module_status_label, "Select an agent first", is_error=True)
             return
         with self.log.step("records:agents", f"Export agent file for “{record.title}”"):
-            item = get_content_store().create_text("note", f"{agent_slug(record.title)} (agent)", agent_definition(record), ".md")
+            item = library().create_text("note", f"{agent_slug(record.title)} (agent)", agent_definition(record), ".md")
         set_status(self.module_status_label, f"Saved “{item.name}” in your Library (Notes)")
 # --- END [1.3] ---
 

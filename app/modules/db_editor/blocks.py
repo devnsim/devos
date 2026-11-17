@@ -15,13 +15,14 @@
 #   6. PropertiesBlock: file, size, version, page stats, journal mode, user version; integrity check,
 #      compact (VACUUM), export.
 # CONTRACT:
-#   - Requires: app.modules.db_editor.engine, app.modules.graph.datasets.save_dataset, app.data.store.content
+#   - Requires: app.modules.db_editor.engine, app.modules.graph.datasets.save_dataset, app.clients.library
 #               (size_text), app.ui (canvas.block_canvas.BlockSpec, canvas.tile_canvas.reserve_controls_space,
 #               ui_tools, theme, widgets.sidebar.load_icon), a DbEditorModule (view.py) passed to every block;
 #               QSS selectors #db_tree, #sql_editor, #structure_sql_view, #structure_title_label, #record_form_panel
 #   - Exposes: block_specs(module), DEFAULT_BLOCKS, RowsModel, ExplorerBlock, DataBlock, RecordBlock,
 #              StructureBlock, SqlBlock, PropertiesBlock, PAGE_SIZE
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] block_layout / table_view / copy_selection / fit_columns / add_button / add_menu_action
 #                  moved to app/ui/ui_tools.py (the new record views and modules use them too).
 #   - [2026-11-16] Created with the Database Editor module. Record form: navigation on top, actions
@@ -68,7 +69,7 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from app.data.store.content import size_text
+from app.data.content_kinds import size_text
 from app.modules.db_editor.engine import coerce_value, quote_identifier
 from app.ui.canvas.block_canvas import BlockSpec
 from app.ui.canvas.tile_canvas import reserve_controls_space

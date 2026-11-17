@@ -13,12 +13,13 @@
 #   4. execute_script(): runs one or many statements, returns result sets and messages, stops at the
 #      first error; properties(), set_pragma(), integrity_check(), vacuum(), backup_to().
 # CONTRACT:
-#   - Requires: sqlite3, app.data.store.content (get_content_store), app.data.store.database (get_database),
+#   - Requires: sqlite3, app.clients.library, app.data.store.database (get_database),
 #               app.data.activity_log
 #   - Exposes: UserDatabases, DatabaseEntry, DbConnection, DbEditorError, ColumnDef, ColumnInfo, DbObject,
 #              RowsPage, QueryResult, SYSTEM_DATABASE_ID, COLUMN_TYPES, quote_identifier(), coerce_value(),
 #              split_statements(), is_sqlite_file()
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created with the Database Editor module. User databases are library files (no save
 #                  dialogs); the system database opens with mode=ro so the editor can never damage DevOS.
 #                  Rows are addressed by rowid, or by primary key for WITHOUT ROWID tables; views are
@@ -60,7 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.data.store.database import get_database
 
 SYSTEM_DATABASE_ID = 0
@@ -235,7 +236,7 @@ class UserDatabases:
     KIND = "database"
 
     def __init__(self) -> None:
-        self.store = get_content_store()
+        self.store = library()
         self.log = get_activity_log()
 
     def entries(self) -> list[DatabaseEntry]:

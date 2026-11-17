@@ -10,12 +10,13 @@
 #   3. Tools for the tool bag: Sum below selection, Copy selection as CSV.
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.modules.spreadsheet (engine, formulas),
-#               app.data.store.content, app.ui (ui_tools, plot_tools, tool_bag, canvas), QSS selectors
+#               app.clients.library, app.ui (ui_tools, plot_tools, tool_bag, canvas), QSS selectors
 #               #spreadsheet_panel, #formula_edit, #cell_name_label, #sheet_tab_bar
 #   - Exposes: SpreadsheetModule(parent=None, context=None) with workbook, sheet, item_id, open_item(),
 #              new_workbook(), import_file(), export_as(extension), selection_changed, sheet_changed;
 #              SheetModel, GridBlock, SelectionBlock, ChartBlock
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created. Formulas are DevOS's own (formulas.py); .xlsx keeps formulas as text so Excel /
 #                  LibreOffice recompute them on open.
 # ==============================================================================
@@ -60,7 +61,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 from app.modules.base import ModuleView
 from app.modules.spreadsheet.engine import (
     Sheet, SpreadsheetError, Workbook, format_value, has_openpyxl, libreoffice_path,
@@ -72,6 +73,7 @@ from app.ui.plot_tools import styled_plot
 from app.ui.theme import ERROR_COLOR, TAG_COLORS
 from app.ui.tool_bag import ToolSpec, register_tools
 from app.ui.ui_tools import block_layout, control_label, set_status, status_label, table_view, tool_button
+from app.ui.engine_bridge import watch_library
 
 SAVE_DELAY_MS = 800
 MIN_ROWS, MIN_COLS = 100, 26
@@ -351,7 +353,7 @@ class SpreadsheetModule(ModuleView):
     def __init__(self, parent: QWidget | None = None, context=None) -> None:
         super().__init__(parent, context, "spreadsheet_panel")
         self.log = get_activity_log()
-        self.store = get_content_store()
+        self.store = library()
         self.workbook = Workbook()
         self.sheet = self.workbook.sheets[0]
         self.item_id: int | None = None
@@ -381,8 +383,7 @@ class SpreadsheetModule(ModuleView):
         self.block_canvas = self.build_block_canvas(self.block_specs(), DEFAULT_BLOCKS)
         layout.addWidget(self.block_canvas, 1)
 
-        self.store.add_listener(self._on_content_changed)
-        self.destroyed.connect(lambda *_: self.store.remove_listener(self._on_content_changed))
+        watch_library(self, self._on_content_changed)
         self._fill_file_combo()
         saved_id = self.setting("item_id")
         if saved_id is not None and self.store.get(saved_id) is not None:

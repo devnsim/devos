@@ -7,9 +7,10 @@
 #   2. save_dataset(name, columns, data) -> content item; import_csv(path) (validated on import).
 #   3. MOCK_GENERATORS: sine, random walk, noise, sawtooth, damped oscillation, exponential growth.
 # CONTRACT:
-#   - Requires: numpy, app.data.store.content (get_content_store), app.data.activity_log
+#   - Requires: numpy, app.clients.library, app.data.activity_log
 #   - Exposes: Dataset, DatasetError, load_dataset(), save_dataset(), import_csv(), make_mock(), MOCK_GENERATORS
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-15] Created with the Graph tool. CSV: first row = column names, numbers after; non-numeric
 #                  cells become NaN (gaps in the line). Every load / import / mock is announced in the log.
 # ==============================================================================
@@ -39,7 +40,7 @@ from pathlib import Path
 import numpy as np
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store
+from app.clients.library import library
 
 
 class DatasetError(Exception):
@@ -72,7 +73,7 @@ def _parse_csv(text: str) -> tuple[list[str], np.ndarray]:
 
 
 def load_dataset(item_id: int) -> Dataset:
-    store = get_content_store()
+    store = library()
     item = store.get(item_id)
     if item is None:
         raise DatasetError(f"dataset #{item_id} no longer exists")
@@ -89,7 +90,7 @@ def save_dataset(name: str, columns: list[str], data: np.ndarray, metadata: dict
     buffer = io.StringIO()
     buffer.write(",".join(columns) + "\n")
     np.savetxt(buffer, np.asarray(data, float), delimiter=",", fmt="%.10g")
-    store = get_content_store()
+    store = library()
     return store.add_bytes("dataset", store.unique_name("dataset", name), buffer.getvalue().encode(), ".csv", metadata)
 
 
@@ -101,7 +102,7 @@ def import_csv(path: str | Path):
             _parse_csv(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, ValueError) as error:
             raise DatasetError(f"{path.name}: {error}") from error
-        return get_content_store().add_file("dataset", path)
+        return library().add_file("dataset", path)
 # --- END [1.2] ---
 
 # ==============================================================================

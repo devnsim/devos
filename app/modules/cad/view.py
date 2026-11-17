@@ -7,10 +7,11 @@
 #   2. Blocks: Viewer (3D), Models (library CAD items: parts and meshes), Info (size, volume, mass by material).
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.modules.cad (engine, mesh_view, workbench),
-#               app.data.store.content, app.ui (ui_tools, tool_bag, canvas), QSS selector #cad_panel
+#               app.clients.library, app.ui (ui_tools, tool_bag, canvas), QSS selector #cad_panel
 #   - Exposes: CadModule(parent=None, context=None) with item_id, mesh, open_item(), new_part(), edit_part(),
 #              import_model(), workbench; ViewerBlock, ModelsBlock, InfoBlock
 # NOTES:
+#   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-16] Created (CAD module + Part Design workbench).
 # ==============================================================================
 
@@ -46,7 +47,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.data.activity_log import get_activity_log
-from app.data.store.content import get_content_store, kind_for_path
+from app.clients.library import library
+from app.data.content_kinds import kind_for_path
 from app.modules.base import ModuleView
 from app.modules.cad.engine import MATERIAL_DENSITIES, PART_FORMAT, CadError, Part, cad_unavailable_reason, load_mesh, measure
 from app.modules.cad.mesh_view import MeshViewer
@@ -54,6 +56,7 @@ from app.ui.canvas.block_canvas import BlockSpec
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.tool_bag import ToolSpec, register_tools
 from app.ui.ui_tools import block_layout, control_label, set_status, status_label
+from app.ui.engine_bridge import watch_library
 
 MESH_FILTER = "Meshes (*.stl *.obj *.ply *.off *.glb *.gltf)"
 DEFAULT_BLOCKS = {"split": "h", "sizes": [1, 3], "children": [
@@ -99,11 +102,11 @@ class ModelsBlock(QWidget):
 
     def refresh(self) -> None:
         self.models_list.clear()
-        for item in get_content_store().items("cad"):
+        for item in library().items("cad"):
             is_part = item.metadata.get("format") == PART_FORMAT
             entry = QListWidgetItem(("⚙ " if is_part else "▲ ") + item.name)
             entry.setData(Qt.ItemDataRole.UserRole, item.item_id)
-            entry.setToolTip("Part (editable)" if is_part else Path(item.file_name).suffix.upper().lstrip(".") + " mesh")
+            entry.setToolTip("Part (editable)" if is_part else item.extension.upper().lstrip(".") + " mesh")
             self.models_list.addItem(entry)
             if item.item_id == self.module.item_id:
                 self.models_list.setCurrentItem(entry)
@@ -163,7 +166,7 @@ class CadModule(ModuleView):
     def __init__(self, parent: QWidget | None = None, context=None) -> None:
         super().__init__(parent, context, "cad_panel")
         self.log = get_activity_log()
-        self.store = get_content_store()
+        self.store = library()
         self.item_id: int | None = None
         self.mesh = None
         self.workbench = None
@@ -194,8 +197,7 @@ class CadModule(ModuleView):
             BlockSpec("info", "Info", "Size, area, volume and mass of the selected model", lambda: InfoBlock(self)),
         ], DEFAULT_BLOCKS)
         layout.addWidget(self.block_canvas, 1)
-        self.store.add_listener(self._on_content_changed)
-        self.destroyed.connect(lambda *_: self.store.remove_listener(self._on_content_changed))
+        watch_library(self, self._on_content_changed)
         saved = self.setting("item_id")
         if saved is not None and self.store.get(saved) is not None:
             self.open_item(saved)
