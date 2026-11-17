@@ -11,10 +11,12 @@
 #      into the library.
 # CONTRACT:
 #   - Requires: app.modules.cad (engine, mesh_view), app.data.store.content, app.data.activity_log, app.ui.theme,
-#               QSS selectors #part_design_window, #workflow_step_list, #create_new_label
+#               app.ui.widgets.step_bar.StepProgressBar, QSS selectors #part_design_window, #create_new_label
 #   - Exposes: PartDesignWindow(part, item_id=None, parent=None) with signal saved(int item_id); SketchCanvas;
 #              STEPS
 # NOTES:
+#   - [2026-11-17] The 1-4 step list on the left became a progress bar across the top (StepProgressBar): name,
+#                  steps and Back / Next in one row, the hint under it, the work area full width.
 #   - [2026-11-16] Created (CAD part design workflow in its own window).
 # ==============================================================================
 
@@ -51,7 +53,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSplitter, QStackedWidget, QToolButton, QVBoxLayout,
+    QLineEdit, QListWidget, QMessageBox, QPushButton, QSplitter, QStackedWidget, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -63,6 +65,7 @@ from app.ui.theme import (
     ACCENT_HIGHLIGHT_COLOR, BACKGROUND_COLOR, BORDER_COLOR, EDGE_COLOR, ERROR_COLOR, MUTED_TEXT_COLOR, SUCCESS_COLOR,
     TEXT_COLOR,
 )
+from app.ui.widgets.step_bar import StepProgressBar
 
 STEPS = ("Sketch", "Features", "Check", "Save & export")
 GRID_MM = 1.0
@@ -347,26 +350,28 @@ class PartDesignWindow(QWidget):
         self.is_dirty = False
         self._rebuild_timer = QTimer(self, singleShot=True, interval=200, timeout=self.rebuild)
 
-        layout = QHBoxLayout(self)
-        steps_panel = QVBoxLayout()
-        steps_panel.addWidget(QLabel("Part Design", objectName="create_new_label"))
+        layout = QVBoxLayout(self)
+        top_row = QHBoxLayout()                       # name · progress through the steps · back / next
+        top_row.setSpacing(12)
+        name_column = QVBoxLayout()
+        name_column.setSpacing(0)
+        name_column.addWidget(QLabel("Part Design", objectName="create_new_label"))
         self.name_edit = QLineEdit(part.name, placeholderText="Part name")
+        self.name_edit.setFixedWidth(220)
         self.name_edit.textChanged.connect(self._rename)
-        steps_panel.addWidget(self.name_edit)
-        self.workflow_step_list = QListWidget(objectName="workflow_step_list")
-        self.workflow_step_list.setFixedWidth(190)
-        self.workflow_step_list.currentRowChanged.connect(self._on_step_clicked)
-        steps_panel.addWidget(self.workflow_step_list, 1)
-        self.step_hint_label = QLabel(objectName="control_label", wordWrap=True)
-        steps_panel.addWidget(self.step_hint_label)
-        nav = QHBoxLayout()
+        name_column.addWidget(self.name_edit)
+        top_row.addLayout(name_column)
+        self.workflow_step_bar = StepProgressBar(STEPS)
+        self.workflow_step_bar.step_clicked.connect(self._on_step_clicked)
+        top_row.addWidget(self.workflow_step_bar, 1)
         self.back_btn, self.next_btn = QPushButton("◀ Back"), QPushButton("Next ▶")
         self.back_btn.clicked.connect(lambda: self.go_to_step(self.pages.currentIndex() - 1))
         self.next_btn.clicked.connect(lambda: self.go_to_step(self.pages.currentIndex() + 1))
-        nav.addWidget(self.back_btn)
-        nav.addWidget(self.next_btn)
-        steps_panel.addLayout(nav)
-        layout.addLayout(steps_panel)
+        top_row.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        top_row.addWidget(self.next_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(top_row)
+        self.step_hint_label = QLabel(objectName="control_label", wordWrap=True)
+        layout.addWidget(self.step_hint_label)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.pages = QStackedWidget()
@@ -423,32 +428,29 @@ class PartDesignWindow(QWidget):
         step = max(0, min(step, len(STEPS) - 1))
         problem = self.step_problem(step)
         if problem:
-            self.step_hint_label.setText(problem)
             step = self.pages.currentIndex()
         self.pages.setCurrentIndex(step)
         self._refresh_steps()
+        if problem:                                   # a locked step was asked for: say why it can't start
+            self.step_hint_label.setText(f"Not yet: {problem}")
         if step == 2:
             self._refresh_check()
 
-    def _on_step_clicked(self, row: int) -> None:
-        if row >= 0 and row != self.pages.currentIndex():
-            self.go_to_step(row)
+    def _on_step_clicked(self, index: int) -> None:
+        if index >= 0 and index != self.pages.currentIndex():
+            self.go_to_step(index)                    # a locked step stays put and says why
 
     def _refresh_steps(self) -> None:
         current = self.pages.currentIndex()
-        self.workflow_step_list.blockSignals(True)
-        self.workflow_step_list.clear()
-        for index, title in enumerate(STEPS):
-            is_open = not self.step_problem(index)
+        states, problems = [], []
+        for index in range(len(STEPS)):
+            problem = self.step_problem(index)
             is_done = index < current or (index == 0 and any(s.shapes for s in self.part.sketches)) or \
                 (index == 1 and self.full_solid is not None)
-            mark = "●" if index == current else ("✓" if is_done else ("○" if is_open else "🔒"))
-            item = QListWidgetItem(f"{mark}  {index + 1}  {title}")
-            if not is_open:
-                item.setForeground(QColor(MUTED_TEXT_COLOR))
-            self.workflow_step_list.addItem(item)
-        self.workflow_step_list.setCurrentRow(current)
-        self.workflow_step_list.blockSignals(False)
+            states.append("current" if index == current else "done" if is_done and not problem else
+                          "locked" if problem else "open")
+            problems.append(problem)
+        self.workflow_step_bar.set_steps(current, states, problems)
         self.back_btn.setEnabled(current > 0)
         next_problem = self.step_problem(current + 1) if current + 1 < len(STEPS) else "Last step"
         self.next_btn.setEnabled(not next_problem)

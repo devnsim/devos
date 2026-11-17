@@ -14,9 +14,11 @@
 #   - Requires: app.ui.canvas.tile_canvas, app.ui.ui_tools, QSS selectors #block_canvas_panel,
 #               #block_tile_panel
 #   - Exposes: BlockSpec, BlockTile, reserve_controls_space(row_layout), BlockCanvas(specs, save_layout=None, saved_layout=None,
-#              default_layout=None); blocks(kind=None) -> content widgets; plus TileCanvas API.
+#              default_layout=None); blocks(kind=None) -> content widgets; show_block(kind) -> content widget;
+#              plus TileCanvas API.
 #              Block content widgets may implement block_state() -> dict and restore_block_state(dict).
 # NOTES:
+#   - [2026-11-17] show_block(kind): bring a view forward or open it beside the active block (open a record's form).
 #   - [2026-11-15] The fading corner controls moved to tile_canvas.CornerControlsTile (module tiles use
 #                  them too); BlockTile is now a thin subclass. reserve_controls_space is re-exported.
 #   - [2026-11-15] reserve_controls_space(): blocks end their top row with it - the corner controls were
@@ -137,4 +139,15 @@ class BlockCanvas(TileCanvas):
         """Content widgets of all blocks (optionally only one kind)."""
         return [tile.content_widget for tile in self.tiles.values()
                 if tile.content_widget is not None and (kind is None or tile.kind == kind)]
+
+    def show_block(self, kind: str) -> QWidget:
+        """Bring a block of `kind` forward (active, controls flash), or open one beside the active block.
+        Returns its content widget."""
+        tile = next((tile for tile in self.tiles.values() if tile.kind == kind and tile.content_widget is not None), None)
+        if tile is None:
+            beside = self.active_tile if self.active_tile in self.tiles.values() else next(iter(self.tiles.values()), None)
+            return self.add_tile(kind, beside=beside).content_widget
+        self._set_active_tile(tile)
+        tile.flash_controls()
+        return tile.content_widget
 # --- END [4.1] ---

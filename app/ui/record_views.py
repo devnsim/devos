@@ -5,7 +5,8 @@
 #           side and the user can swap them; they share one selection and one search.
 # PURPOSE:
 #   1. RecordsController: the collection, the selected record, the search text; signals so views follow
-#      each other; create / change / delete with errors reported (never silent).
+#      each other; create / change / duplicate / delete with errors reported (never silent); open_form()
+#      (double-click a record) and show_record_menu() (right-click a record in any view).
 #   2. Blocks: TableBlock (inline edits, sort), BoardBlock (cards grouped by a select property, drag
 #      between columns), TimelineBlock (bars from start / end dates; drag to move, drag the end to resize),
 #      CalendarBlock (records on their date; drag to another day), FormBlock (every property of the
@@ -15,9 +16,12 @@
 #   - Requires: app.data.store.records, app.ui.canvas.block_canvas.BlockSpec, app.ui.ui_tools, app.ui.theme,
 #               QSS selectors #record_title_edit, #board_column_panel, #board_column_label, #record_meta_label,
 #               #record_long_text_edit
-#   - Exposes: RecordsController(collection, noun, parent), record_block_specs(controller), TableBlock,
-#              BoardBlock, TimelineBlock, CalendarBlock, FormBlock, RECORD_MIME
+#   - Exposes: RecordsController(collection, noun, parent) with form_requested(int), record_actions,
+#              open_form(id), record_menu(id, parent), show_record_menu(id, parent, pos), record_block_specs(controller),
+#              TableBlock, BoardBlock, TimelineBlock, CalendarBlock, FormBlock, RECORD_MIME
 # NOTES:
+#   - [2026-11-17] Double-clicking a record on the board, timeline (name or bar) or calendar opens its form view;
+#                  right-clicking a record in any view offers Open form, module actions, Duplicate, Delete.
 #   - [2026-11-16] Created for the Agents and Projects modules ("views": one set of data, many pictures).
 # ==============================================================================
 
@@ -106,6 +110,7 @@ class RecordsController(QObject):
     records_changed = Signal()
     selection_changed = Signal()
     status = Signal(str, bool)                       # message, is_error
+    form_requested = Signal(int)                     # record_id: show this record's form view
 
     def __init__(self, collection: RecordCollection, noun: str = "record", parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -114,6 +119,7 @@ class RecordsController(QObject):
         self.search = ""
         self.log = get_activity_log()
         self.source = f"records:{collection.collection}"
+        self.record_actions: list[tuple[str, object]] = []   # (title, handler(record_id)) added to the record menu
         # Views refresh on the next event-loop turn: several changes coalesce, and an editor that caused the
         # change (a table cell commit) has finished before its model resets.
         self._changed_timer = QTimer(self, singleShot=True, interval=0, timeout=self.records_changed.emit)
@@ -141,6 +147,36 @@ class RecordsController(QObject):
 
     def selected(self) -> Record | None:
         return self.collection.get(self.selected_id) if self.selected_id is not None else None
+
+    def open_form(self, record_id: int) -> None:
+        """Select the record and ask the module to show its form view (double-click, menu)."""
+        self.select(record_id)
+        self.form_requested.emit(record_id)
+
+    def record_menu(self, record_id: int, parent: QWidget) -> QMenu | None:
+        """The right-click menu every view shows for a record: open its form, module actions, duplicate,
+        delete. Selects the record."""
+        if self.collection.get(record_id) is None:
+            return None
+        self.select(record_id)
+        menu = QMenu(parent)
+        menu.addAction("Open form").triggered.connect(lambda: self.open_form(record_id))
+        for title, handler in self.record_actions:
+            menu.addAction(title).triggered.connect(lambda _checked=False, handler=handler: handler(record_id))
+        menu.addSeparator()
+        menu.addAction("Duplicate").triggered.connect(lambda: self.duplicate(record_id))
+        menu.addAction(f"Delete {self.noun}…").triggered.connect(lambda: self.delete([record_id], parent))
+        return menu
+
+    def show_record_menu(self, record_id: int, parent: QWidget, global_pos: QPoint) -> None:
+        menu = self.record_menu(record_id, parent)
+        if menu is not None:
+            menu.exec(global_pos)
+            menu.deleteLater()
+
+    def duplicate(self, record_id: int) -> None:
+        if self.collection.get(record_id) is not None:
+            self.select(self.collection.duplicate(record_id).record_id)
 
     def new_record(self, values: dict | None = None, title: str | None = None) -> Record:
         record = self.collection.create(title or f"New {self.noun}", values or {})
@@ -422,6 +458,8 @@ class TableBlock(QWidget):
         self.records_table.verticalHeader().hide()
         self.records_table.horizontalHeader().sectionClicked.connect(self._sort_by)
         self.records_table.selectionModel().currentRowChanged.connect(self._on_row_changed)
+        self.records_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.records_table.customContextMenuRequested.connect(self._show_record_menu)
         layout.addWidget(self.records_table, 1)
         controller.records_changed.connect(self.refresh)
         controller.selection_changed.connect(self._show_selection)
@@ -444,6 +482,12 @@ class TableBlock(QWidget):
                 if self.records_table.currentIndex().row() != row_index:
                     self.records_table.selectRow(row_index)
                 return
+
+    def _show_record_menu(self, pos: QPoint) -> None:
+        index = self.records_table.indexAt(pos)
+        if index.isValid() and index.row() < len(self.model.rows):
+            self.controller.show_record_menu(self.model.rows[index.row()].record_id, self,
+                                             self.records_table.viewport().mapToGlobal(pos))
 
     def _sort_by(self, column: int) -> None:
         key = self.model.columns[column].key
@@ -483,6 +527,12 @@ class BoardColumn(QListWidget):
         self.setWordWrap(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.itemClicked.connect(lambda item: board.controller.select(item.data(Qt.ItemDataRole.UserRole)))
+        self.itemDoubleClicked.connect(lambda item: board.controller.open_form(item.data(Qt.ItemDataRole.UserRole)))
+
+    def contextMenuEvent(self, event) -> None:                            # noqa: N802
+        item = self.itemAt(event.pos())
+        if item is not None:
+            self.board.controller.show_record_menu(item.data(Qt.ItemDataRole.UserRole), self, event.globalPos())
 
     def startDrag(self, _actions) -> None:                               # noqa: N802
         item = self.currentItem()
@@ -754,10 +804,24 @@ class TimelineCanvas(QWidget):
             self.block.commit_dates(record.record_id, start, end)
 
     def mouseDoubleClickEvent(self, event) -> None:                      # noqa: N802
+        """An unscheduled row's empty chart: schedule it there. Its name or its bar: open its form."""
         row_index = self._row_at(event.position().y())
-        if row_index is not None and self.rows[row_index][1] is None and event.position().x() > self.NAME_PX:
-            day = self.day_at(event.position().x())
-            self.block.commit_dates(self.rows[row_index][0].record_id, day, day + dt.timedelta(days=6))
+        if row_index is None:
+            return
+        record, start, _end = self.rows[row_index]
+        x = event.position().x()
+        if start is None and x > self.visible_left() + self.NAME_PX:
+            day = self.day_at(x)
+            self.block.commit_dates(record.record_id, day, day + dt.timedelta(days=6))
+        else:
+            self._drag = None
+            self.block.controller.open_form(record.record_id)
+
+    def contextMenuEvent(self, event) -> None:                            # noqa: N802
+        row_index = self._row_at(event.pos().y())
+        if row_index is not None:
+            self._drag = None
+            self.block.controller.show_record_menu(self.rows[row_index][0].record_id, self, event.globalPos())
 
 
 class TimelineBlock(QWidget):
@@ -934,9 +998,20 @@ class CalendarGrid(QWidget):
         self._press = None
 
     def mouseDoubleClickEvent(self, event) -> None:                      # noqa: N802
-        day = self.day_at(event.position().toPoint())
-        if day is not None and self._chip_at(event.position().toPoint()) is None and self.block.date_key:
+        """A record: open its form. An empty part of a day: a new record on that day."""
+        point = event.position().toPoint()
+        record, day = self._chip_at(point), self.day_at(point)
+        if record is not None:
+            self._press = None
+            self.block.controller.open_form(record.record_id)
+        elif day is not None and self.block.date_key:
             self.block.controller.new_record({self.block.date_key: day.isoformat()})
+
+    def contextMenuEvent(self, event) -> None:                            # noqa: N802
+        record = self._chip_at(event.pos())
+        if record is not None:
+            self._press = None
+            self.block.controller.show_record_menu(record.record_id, self, event.globalPos())
 
     def dragEnterEvent(self, event) -> None:                             # noqa: N802
         event.acceptProposedAction() if dragged_record_id(event) is not None else event.ignore()
@@ -1056,7 +1131,7 @@ class FormBlock(QWidget):
         self.more_btn = QToolButton(text="⋯", toolTip=f"Duplicate / delete this {controller.noun}", objectName="menu_glyph_btn",
                                     popupMode=QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.more_btn)
-        menu.addAction("Duplicate").triggered.connect(self._duplicate)
+        menu.addAction("Duplicate").triggered.connect(lambda: controller.duplicate(controller.selected_id))
         menu.addAction("Delete").triggered.connect(lambda: controller.delete([controller.selected_id], self))
         self.more_btn.setMenu(menu)
         row.addWidget(self.more_btn)
@@ -1137,11 +1212,6 @@ class FormBlock(QWidget):
         if record is not None and self.title_edit.text().strip() != record.title:
             if not self.controller.set_value(record.record_id, TITLE_KEY, self.title_edit.text().strip()):
                 self.title_edit.setText(record.title)
-
-    def _duplicate(self) -> None:
-        record = self.controller.selected()
-        if record is not None:
-            self.controller.select(self.controller.collection.duplicate(record.record_id).record_id)
 
     def _add_property(self) -> None:
         dialog = AddPropertyDialog(self)

@@ -11,6 +11,7 @@
 #               #selector no widget uses, so this list can't silently go stale.
 #   - Exposes: STYLESHEET (str) and every *_COLOR / *_PX token, for widgets that need a color in code.
 # NOTES:
+#   - [2026-11-17] Agents chat styles (#chat_*); the Part Design step list styles went (it is a painted step bar now).
 #   - [2026-11-17] Styles for Canvas pages (#infinite_canvas_*, #module_card_panel, #card_*, #canvas_control*),
 #                  the New Canvas button and the web app's floating options button (#web_app_options_btn).
 #   - [2026-11-16] ERROR / WARNING / SUCCESS colour tokens and TAG_COLORS; styles for toolbars, the tool bag,
@@ -408,6 +409,15 @@ MODULE_QSS = f"""
 #record_long_text_edit, #cypher_editor, #mail_body_view {{ background: {BACKGROUND_COLOR}; border: 1px solid {BORDER_COLOR}; }}
 #cypher_editor, #formula_edit {{ font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 12px; }}
 #menu_glyph_btn::menu-indicator {{ image: none; width: 0px; }}
+/* Agents chat (app/modules/agents/blocks.py) */
+#chat_messages_panel {{ background: transparent; }}
+#chat_message_panel {{ background: {PANEL_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: 6px; }}
+#chat_message_panel[role="user"] {{ background: {HEADER_COLOR}; border-left: 3px solid {ACCENT_HIGHLIGHT_COLOR}; }}
+#chat_caption_label {{ color: {MUTED_TEXT_COLOR}; font-size: 11px; font-weight: 600; background: transparent; }}
+#chat_message_label {{ background: transparent; font-size: 13px; }}
+#chat_agent_label {{ font-weight: 600; background: transparent; padding-right: 4px; }}
+#chat_input_edit {{ background: {BACKGROUND_COLOR}; border: 1px solid {EDGE_COLOR}; border-radius: 4px; font-size: 13px; }}
+#chat_input_edit:focus {{ border-color: {ACCENT_HIGHLIGHT_COLOR}; }}
 /* Toolbars (toolbars.py) and the tool bag (tool_bag.py) */
 #tool_tray_panel {{ background: {HEADER_COLOR}; border: 1px solid {BORDER_COLOR}; border-radius: 3px; }}
 #tray_grip_label {{ color: {MUTED_TEXT_COLOR}; background: transparent; padding: 0px 3px; }}
@@ -425,8 +435,6 @@ MODULE_QSS = f"""
 #comms_banner_label {{ color: {WARNING_COLOR}; background: {HEADER_COLOR}; border-left: 3px solid {WARNING_COLOR}; padding: 6px; }}
 #dial_btn {{ font-size: 16px; padding: 8px; }}
 #part_design_window {{ background: {BACKGROUND_COLOR}; }}
-#workflow_step_list {{ font-size: 13px; border: none; background: {PANEL_COLOR}; }}
-#workflow_step_list::item {{ padding: 8px 6px; }}
 /* Trading chart */
 #chart_legend_label {{ font-size: 11px; background: transparent; padding: 0px 2px; }}
 #timeframe_btn {{ padding: 2px 6px; }}

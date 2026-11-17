@@ -7,12 +7,16 @@
 #   2. Opens the collection (shared per database, so two tiles of the same module stay in sync), keeps
 #      the selected record in the module's settings, reports outcomes in a status line.
 #   3. Export: the records as JSON into the user's library (subclasses can add more actions).
+#   4. A record's form opens as a view on request (double-click / right-click a record in any view).
 # CONTRACT:
 #   - Requires: app.modules.base.ModuleView, app.data.store.records, app.ui.record_views,
 #               app.data.store.content, app.ui.ui_tools, QSS selector #records_module_panel
 #   - Exposes: RecordsModule(parent=None, context=None) with collection, controller, block_canvas,
-#              add_toolbar_actions(row) hook, export_actions() hook -> [(title, handler)]
+#              NEW_RECORD_PRESETS, hooks add_toolbar_actions(row), extra_block_specs() -> [BlockSpec],
+#              record_actions() -> [(title, handler(record_id))], export_actions() -> [(title, handler)]
 # NOTES:
+#   - [2026-11-17] Form requests open / bring forward the form view; hooks for preset new records (+ New menu),
+#                  module-specific blocks and record actions (Agents: Claude / Gemini / Ollama agents, Chat).
 #   - [2026-11-16] Created with the Agents and Projects modules (the reusable "every line is a record" model).
 # ==============================================================================
 
@@ -40,6 +44,7 @@ from app.data.activity_log import get_activity_log
 from app.data.store.content import get_content_store
 from app.data.store.records import PropertySpec, get_collection
 from app.modules.base import ModuleView
+from app.ui.canvas.block_canvas import BlockSpec
 from app.ui.canvas.tile_canvas import reserve_controls_space
 from app.ui.record_views import RecordsController, record_block_specs
 from app.ui.ui_tools import set_status, status_label, tool_button
@@ -54,6 +59,7 @@ class RecordsModule(ModuleView):
     NOUN = "record"
     PROPERTIES: list[PropertySpec] = []
     DEFAULT_LAYOUT: dict | None = None
+    NEW_RECORD_PRESETS: list[tuple[str, dict]] = []   # (menu title, values): + New offers these as a menu
     SELECTED_SETTING = "selected_id"
 
     def __init__(self, parent: QWidget | None = None, context=None) -> None:
@@ -68,7 +74,14 @@ class RecordsModule(ModuleView):
         layout.setSpacing(4)
         row = QHBoxLayout()
         new_btn = QPushButton(f"+ New {self.NOUN}")
-        new_btn.clicked.connect(lambda: self.controller.new_record())
+        if self.NEW_RECORD_PRESETS:
+            new_menu = QMenu(new_btn)
+            for title, values in self.NEW_RECORD_PRESETS:
+                new_menu.addAction(title).triggered.connect(
+                    lambda _checked=False, title=title, values=values: self.controller.new_record(dict(values), f"New {title}"))
+            new_btn.setMenu(new_menu)
+        else:
+            new_btn.clicked.connect(lambda: self.controller.new_record())
         row.addWidget(new_btn)
         self.add_toolbar_actions(row)
         export_btn = tool_button("module_settings_btn", text="⋯", tool_tip="Export")
@@ -81,8 +94,11 @@ class RecordsModule(ModuleView):
         reserve_controls_space(row)
         layout.addLayout(row)
 
-        self.block_canvas = self.build_block_canvas(record_block_specs(self.controller), self.DEFAULT_LAYOUT)
+        self.controller.record_actions = self.record_actions()
+        self.block_canvas = self.build_block_canvas(record_block_specs(self.controller) + self.extra_block_specs(),
+                                                    self.DEFAULT_LAYOUT)
         layout.addWidget(self.block_canvas, 1)
+        self.controller.form_requested.connect(lambda _record_id: self.block_canvas.show_block("form"))
         self.controller.status.connect(lambda text, is_error: set_status(self.module_status_label, text, is_error))
         self.controller.records_changed.connect(self._update_count)
         self.controller.selection_changed.connect(lambda: self.save_setting(self.SELECTED_SETTING, self.controller.selected_id))
@@ -93,6 +109,14 @@ class RecordsModule(ModuleView):
 
     def add_toolbar_actions(self, row: QHBoxLayout) -> None:
         """Hook: subclasses add their own buttons after + New."""
+
+    def extra_block_specs(self) -> list[BlockSpec]:
+        """Hook: the module's own views, offered next to table / board / timeline / calendar / form."""
+        return []
+
+    def record_actions(self) -> list[tuple[str, object]]:
+        """Hook: (menu title, handler(record_id)) added to the right-click menu of a record in every view."""
+        return []
 
     def export_actions(self) -> list[tuple[str, object]]:
         """Hook: (menu title, handler) pairs added to the ⋯ menu."""

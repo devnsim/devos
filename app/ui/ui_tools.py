@@ -8,16 +8,17 @@
 #   4. Blocks: block_layout() (skeleton with a top row), table_view() (+ Ctrl+C copy), copy_selection(),
 #      fit_columns(), add_button(), add_menu_action().
 #   5. status_label() / set_status(): the muted one-line outcome label of a module (red for errors).
-#   6. run_in_thread(owner, work, on_done): slow work (network, files) off the UI thread; on_done(result,
-#      error) runs back on the UI thread.
+#   6. run_in_thread(owner, work, on_done, on_progress=None): slow work (network, files) off the UI thread;
+#      on_done(result, error) (and on_progress(value) for each report) run back on the UI thread.
 # CONTRACT:
 #   - Requires: PySide6, app.ui.widgets.sidebar.load_icon (imported lazily), QSS selectors #control_label,
 #               #module_status_label
 #   - Exposes: set_style_property(widget, name, value), control_label(text), tool_button(...),
 #              block_layout(widget), table_view(object_name), copy_selection(view), fit_columns(view),
 #              add_button(row, text, handler), add_menu_action(menu, text, handler), status_label(),
-#              set_status(label, text, is_error), run_in_thread(owner, work, on_done)
+#              set_status(label, text, is_error), run_in_thread(owner, work, on_done, on_progress=None)
 # NOTES:
+#   - [2026-11-17] run_in_thread() takes on_progress: work(report) streams values to the UI thread (agent chat).
 #   - [2026-11-16] Block helpers moved here from the Database Editor (records views, spreadsheet, monitor,
 #                  graph database, comms use them); status_label() / set_status() and run_in_thread() added.
 #   - [2026-11-15] Created in the health pass: the unpolish/polish dance was copied into 4 files and the
@@ -162,26 +163,41 @@ def set_status(label: QLabel, text: str, is_error: bool = False) -> None:
 # ==============================================================================
 class _ThreadJob(QObject):
     finished = Signal(object, object)                    # result, error (emitted from the worker thread)
+    progressed = Signal(object)                          # a piece of progress (emitted from the worker thread)
 
-    def __init__(self, owner: QObject, on_done) -> None:
-        super().__init__(owner)                          # lives in the UI thread: the slot below runs there
-        self.on_done = on_done
+    def __init__(self, owner: QObject, on_done, on_progress=None) -> None:
+        super().__init__(owner)                          # lives in the UI thread: the slots below run there
+        self.on_done, self.on_progress = on_done, on_progress
         self.finished.connect(self.deliver, Qt.ConnectionType.QueuedConnection)
+        self.progressed.connect(self.deliver_progress, Qt.ConnectionType.QueuedConnection)
 
     @Slot(object, object)
     def deliver(self, result, error) -> None:
         self.on_done(result, error)
         self.deleteLater()
 
+    @Slot(object)
+    def deliver_progress(self, value) -> None:
+        if self.on_progress is not None:
+            self.on_progress(value)
 
-def run_in_thread(owner: QObject, work, on_done) -> None:
+
+def run_in_thread(owner: QObject, work, on_done, on_progress=None) -> None:
     """Run work() on a worker thread; on_done(result, error) is called on the UI thread afterwards
-    (skipped if `owner` was deleted meanwhile). Never touch widgets inside work()."""
-    job = _ThreadJob(owner, on_done)
+    (skipped if `owner` was deleted meanwhile). Never touch widgets inside work().
+    With on_progress, work is called as work(report): every report(value) reaches on_progress(value) on the
+    UI thread, in order, before on_done (streamed answers, download progress)."""
+    job = _ThreadJob(owner, on_done, on_progress)
+
+    def report(value) -> None:
+        try:
+            job.progressed.emit(value)
+        except RuntimeError:                              # owner (and job) deleted while working
+            pass
 
     def target() -> None:
         try:
-            result, error = work(), None
+            result, error = (work(report) if on_progress is not None else work()), None
         except Exception as caught:                       # reported to on_done, never lost
             result, error = None, caught
         try:

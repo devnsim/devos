@@ -8,12 +8,14 @@
 #   2. Passwords: keyring when available, else kept in memory for this session only.
 #   3. Mail: fetch_headers(), fetch_body(), send_mail(), parse_message() (plain text preferred, HTML stripped).
 # CONTRACT:
-#   - Requires: app.data.store.database.Database, standard library imaplib / smtplib / email, keyring (optional).
+#   - Requires: app.data.store.database.Database, app.data.store.secrets (keyring), standard library imaplib /
+#               smtplib / email.
 #               No Qt.
 #   - Exposes: CommsStore(database), MailAccount, MailSummary, CommsError, get_password(), set_password(),
 #              password_storage(), fetch_headers(account, password, folder, limit), fetch_body(...),
 #              send_mail(account, password, to, subject, body), parse_message(raw) -> (headers, body), html_to_text()
 # NOTES:
+#   - [2026-11-17] Passwords go through app.data.store.secrets (shared with the Agents module's API keys).
 #   - [2026-11-16] Created with the Comms module. Text and calls have no provider yet; their threads are local.
 # ==============================================================================
 
@@ -54,6 +56,7 @@ from email.message import EmailMessage
 from email.utils import format_datetime, parsedate_to_datetime
 
 from app.data.store.database import Database
+from app.data.store.secrets import forget_secret, get_secret, secret_storage, set_secret
 
 KEYRING_SERVICE = "devos-comms"
 MIGRATIONS = [
@@ -179,56 +182,20 @@ class CommsStore:
 # ==============================================================================
 # [1.3] passwords
 # ==============================================================================
-_session_passwords: dict[int, str] = {}
-
-
-def _keyring():
-    try:
-        import keyring
-        keyring.get_keyring()
-        return keyring
-    except Exception:                                  # no package, or no usable backend (no Secret Service)
-        return None
-
-
 def password_storage() -> str:
-    ring = _keyring()
-    if ring is None:
-        return "this session only (no system keyring)"
-    name = type(ring.get_keyring()).__name__
-    return "nowhere (no keyring backend)" if "fail" in name.lower() else f"system keyring ({name})"
+    return secret_storage()
 
 
 def set_password(account_id: int, password: str, remember: bool = True) -> None:
-    _session_passwords[account_id] = password
-    ring = _keyring()
-    if remember and ring is not None:
-        try:
-            ring.set_password(KEYRING_SERVICE, str(account_id), password)
-        except Exception:                              # keyring locked / unavailable: session memory still works
-            pass
+    set_secret(KEYRING_SERVICE, str(account_id), password, remember)
 
 
 def get_password(account_id: int) -> str | None:
-    if account_id in _session_passwords:
-        return _session_passwords[account_id]
-    ring = _keyring()
-    if ring is not None:
-        try:
-            return ring.get_password(KEYRING_SERVICE, str(account_id))
-        except Exception:
-            return None
-    return None
+    return get_secret(KEYRING_SERVICE, str(account_id))
 
 
 def forget_password(account_id: int) -> None:
-    _session_passwords.pop(account_id, None)
-    ring = _keyring()
-    if ring is not None:
-        try:
-            ring.delete_password(KEYRING_SERVICE, str(account_id))
-        except Exception:
-            pass
+    forget_secret(KEYRING_SERVICE, str(account_id))
 # --- END [1.3] ---
 
 

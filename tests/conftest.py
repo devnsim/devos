@@ -9,6 +9,7 @@
 #   - Requires: pytest, PySide6
 #   - Exposes: fixtures qapp, database, pump, wait_for
 # NOTES:
+#   - [2026-11-17] Tests use keyring's null backend and no provider API keys (Agents chat, Comms passwords).
 #   - [2026-11-16] qapp tears Qt WebEngine down in order at the end (the run exited with a segfault).
 #   - [2026-11-16] qapp prepares Qt WebEngine before creating the QApplication (browser page tests).
 #   - [2026-11-15] Created in the health pass (tests used to live in throw-away scripts).
@@ -38,6 +39,9 @@ from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["DEVOS_DATA_DIR"] = tempfile.mkdtemp(prefix="devos_tests_")
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"   # never the user's real keyring
+for name in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):        # never a real provider call
+    os.environ.pop(name, None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
