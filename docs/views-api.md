@@ -1,6 +1,6 @@
 # View API v1
 
-How a view plugs into DevOS. Built-in views, views shipped with an engine (Phase 3) and user-written views (Phase 12) all use exactly this API. Code: `app/views/` (`api.py`, `host.py`, `channels.py`, `subscriptions.py`, `builder.py`); built-in views live in `app/views/types/`.
+How a view plugs into DevOS. Built-in views, views shipped with an engine (Phase 3) and user-written views (Phase 13) all use exactly this API. Code: `app/views/` (`api.py`, `host.py`, `channels.py`, `subscriptions.py`, `builder.py`); built-in views live in `app/views/types/`.
 
 ## The pieces
 

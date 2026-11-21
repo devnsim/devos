@@ -18,6 +18,9 @@
 #                  git tag, so every build verifies the exact sources. Offline / Nix builds point
 #                  FETCHCONTENT_SOURCE_DIR_JOLTPHYSICS at an unpacked copy. A third CTest entry runs --verify
 #                  with a PID loop (controller snapshots in the worldline).
+#   - [2026-11-20] install() rules (library, public headers, CLI, Python module under
+#                  DEVOS_PHYSICS_PYTHON_INSTALL_DIR) so Nix can package it (nix/physics.nix); RPATHs point at
+#                  the installed library. Phase 6a.
 # ==============================================================================
 cmake_minimum_required(VERSION 3.24)
 project(devos_physics VERSION 0.1.0 LANGUAGES CXX)
@@ -26,6 +29,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)        # Jolt is linked statically into the shared library
+include(GNUInstallDirs)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -105,4 +109,17 @@ if(DEVOS_PHYSICS_PYTHON)
   set_target_properties(devos_physics_python PROPERTIES OUTPUT_NAME devos_physics
                         BUILD_RPATH "$<TARGET_FILE_DIR:devos_physics>")
   target_link_libraries(devos_physics_python PRIVATE devos_physics)
+endif()
+
+# ---- install (nix/physics.nix; `cmake --install`) --------------------------------------------------------
+# Jolt is static and private, so only our own library, headers, the CLI and the Python module are installed.
+set(DEVOS_PHYSICS_PYTHON_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/python" CACHE STRING
+    "Where the devos_physics Python module is installed (relative to the prefix)")
+set_target_properties(devos_physics_cli PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+install(TARGETS devos_physics LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS devos_physics_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(DEVOS_PHYSICS_PYTHON)
+  set_target_properties(devos_physics_python PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+  install(TARGETS devos_physics_python LIBRARY DESTINATION ${DEVOS_PHYSICS_PYTHON_INSTALL_DIR})
 endif()

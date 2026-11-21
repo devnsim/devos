@@ -1,7 +1,7 @@
 # ==============================================================================
 # FILE: app/views/api.py
 # OVERVIEW: View type API v1 - how a view plugs into DevOS. Built-in views, views shipped with an engine and
-#           (Phase 12) user-written views all use exactly this. The full contract is docs/views-api.md.
+#           (Phase 13) user-written views all use exactly this. The full contract is docs/views-api.md.
 # PURPOSE:
 #   1. ViewType: id, title, the shapes it draws, its mapping slots (which field plays which role), the engine
 #      that ships it, and create(host) -> QWidget. register_view_type() / view_type() / view_types(shape) /
@@ -18,6 +18,7 @@
 #              view_types(), TableData, default_mapping(), make_definition(), upgrade_definition(), source_key(),
 #              tag_color(), field_text(), parse_date(), RECORD_MIME, start_record_drag(), dragged_record_id()
 # NOTES:
+#   - [2026-11-20] Phase references renumbered (a new Phase 6, Portable DevOS, comes before the OS layer).
 #   - [2026-11-17] MappingSlot.auto; optional slots never reuse a field another slot took (a chart drew Y twice).
 #   - [2026-11-17] Phase 5b: ViewType.accepts(source) / can_show() - a view for some sources only (the SQL console: databases).
 #   - [2026-11-17] Phase 5a: upgrade_definition maps sources of the retired records engine to the Data engine (ENGINE_RENAMES).

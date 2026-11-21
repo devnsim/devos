@@ -1,37 +1,24 @@
-#--DevOS development shell--
+# ==============================================================================
+# FILE: shell.nix
+# OVERVIEW: The DevOS development shell: Python with every library (nix/python.nix), the C++ toolchain for
+#           core/ and core/physics/, Qt's plugins, and optionally n8n. Also the flake's devShells.default.
+# PURPOSE:
+#   1. nix-shell (or `nix develop`): run, test and build DevOS from the checkout (python -m app.main).
+#   2. Same nixpkgs as the flake (flake.lock, via nix/pinned.nix), so the shell matches the package.
+# CONTRACT:
+#   - Requires: flake.lock (when pkgs isn't passed in).
+#   - Exposes: the mkShell derivation; arguments pkgs, withN8n (default true; --arg withN8n false skips it).
+# NOTES:
+#   - [2026-11-20] Phase 6a: pinned nixpkgs (was <nixpkgs>), Python list moved to nix/python.nix, the n8n rule to
+#                  nix/pkgs.nix; standard header.
+# ==============================================================================
 
-# Purpose:
-# This shell brings in packages that will be called upon later and spins up a nix shell environment to run them in.
-
-
-#------------------------------------
-
-{ pkgs ? import <nixpkgs> {
-    # n8n is source-available (Sustainable Use License), which nixpkgs counts as unfree: allow that one package only
-    config.allowUnfreePredicate = pkg: (pkg.pname or (builtins.parseDrvName pkg.name).name) == "n8n";
-  }
+{ pkgs ? (import ./nix/pinned.nix).pkgs
 , withN8n ? true   # nix-shell --arg withN8n false skips n8n (large) when you don't use the n8n web app
 }:
 
 let
-  python = pkgs.python3.withPackages (ps: with ps; [
-    pyside6
-    psutil      # System and device stats
-    pybind11    # C++ <-> Python bindings
-    numpy       # n-dimensional arrays (Tensor4D)
-    pyqtgraph   # fast plots: waterfall + 3D scatter (runs on PySide6)
-    pyopengl    # OpenGL for pyqtgraph's 3D view
-    trimesh     # CAD mesh import (.stl / .obj) for the wave simulator and the CAD module
-    shapely     # 2D sketch geometry for CAD part design (extrude needs it)
-    mapbox-earcut  # polygon triangulation used by trimesh's extrude
-    manifold3d  # robust mesh booleans for CAD part design (pocket / hole / union)
-    networkx    # graph layouts for the graph database view
-    kuzu        # embedded graph database (Graph DB module)
-    openpyxl    # .xlsx read / write for the Spreadsheet module (LibreOffice handles .ods / .xls)
-    keyring     # system keyring for Comms passwords and Agents API keys (never stored in SQLite)
-    pyarrow     # Apache Arrow: binary encoding of big data shapes between engines and views (engine plan)
-    pytest      # tests/ (python -m pytest -q)
-  ]);
+  python = pkgs.python3.withPackages (import ./nix/python.nix).development;
 in
 pkgs.mkShell {
   packages = [

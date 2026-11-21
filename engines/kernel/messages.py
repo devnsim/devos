@@ -14,6 +14,7 @@
 #   - Exposes: Message, MESSAGE_KINDS, EFFECTS, RequestSpec, EngineManifest, EngineError, plain_data(value),
 #              new_id(), WIRE_VERSION
 # NOTES:
+#   - [2026-11-20] Phase references renumbered (a new Phase 6, Portable DevOS, comes before the OS layer).
 #   - [2026-11-17] Phase 5a: EngineManifest.uses - the engines an engine may ask (Engine.ask).
 #   - [2026-11-17] Phase 3: "credit" message kind (stream back-pressure); RequestSpec shape, example, timeout_s.
 #   - [2026-11-17] Created in Phase 1 of the engine plan (docs/architecture/engine-plan.md).
@@ -27,7 +28,7 @@
 # - attachment: Named binary data next to the payload (bytes, or anything with __array_interface__, e.g. a
 #   NumPy array); never JSON-encoded, so big arrays travel cheaply.
 # - effect (str): What a request does to the world: "none" (reads), "writes" (changes data), "external"
-#   (talks to the outside world), "spends" (costs money). Agents' permissions follow it (Phase 10).
+#   (talks to the outside world), "spends" (costs money). Agents' permissions follow it (Phase 11).
 # - WIRE_VERSION (int): Version of the message format (bump when a field's meaning changes).
 # ==============================================================================
 
@@ -128,7 +129,7 @@ class Message:
         return self.topic.split(".", 1)[1]
 
     def header(self) -> dict:
-        """Everything but the attachments' bytes: what a socket or NATS transport sends as JSON (Phase 13)."""
+        """Everything but the attachments' bytes: what a socket or NATS transport sends as JSON (Phase 14)."""
         return {"kind": self.kind, "topic": self.topic, "payload": self.payload, "message_id": self.message_id,
                 "correlation": self.correlation, "version": self.version, "window": self.window,
                 "attachments": sorted(self.attachments)}

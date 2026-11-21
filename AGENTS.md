@@ -17,7 +17,8 @@ Window ─ sidebar (user pages & folders, SQLite)  +  TabArea (tiling panes of t
 | Module app | `app/modules/<name>/` — `view.py` (UI), `blocks.py` (views as blocks), `engine.py` (logic), `store.py` (SQLite) | Register in `app/modules/registry.py`. |
 | Data | `app/data/` — `activity_log.py`, `store/database.py` (SQLite), `store/pages.py`, `store/backup.py`, `tensor4d.py`, `em_materials.py` | No Qt, views or modules in `app/data/` (checked). What is stored where: `docs/architecture/data-ownership.md`. |
 | Engines (in progress) | `engines/<name>/` — see `docs/architecture/engine-plan.md` (seven engines, data shapes, communication principles, phases, contracts) | No Qt, views or modules (checked by `check_standard.py`). Follow the plan's current phase. |
-| Native | `core/src/*.cpp` + `app/native/` (bridge + identical NumPy mirror) | Build: `python -m app.native.build`. |
+| Native | `core/src/*.cpp` + `app/native/` (bridge + identical NumPy mirror) | Build: `python -m app.native.build` (the Nix package builds it as `devos-native`). |
+| Packaging | `flake.nix` + `nix/` (`package.nix`, `native.nix`, `physics.nix`, `python.nix`, `modules.nix`, `checks.nix`); `default.nix`, `shell.nix` | One pinned nixpkgs (`flake.lock`) for the package, the checks and the dev shell. |
 | Physics engine | `core/physics/` — standalone C++20 project: `libdevos_physics.so` (MuJoCo + Jolt behind `PhysicsWorld`), `devos_physics_cli`, tests, thin pybind11 module `devos_physics` | **Strict boundary: nothing in `core/physics/` may reference `app/`.** Build: `cmake -S core/physics -B core/physics/build && cmake --build core/physics/build -j && ctest --test-dir core/physics/build`. See `core/physics/README.md`. |
 
 ## 2. Use these — don't rebuild them
@@ -70,6 +71,7 @@ If you write the same helper a second time, move it into one of these files inst
 - **Physics engine change:** C++ in `core/physics/src/` (public API in `include/devos/physics/`, no Jolt types there); add a check to `tests/test_physics.cpp`; rebuild and run `ctest` plus `devos_physics_cli core/physics/scenes/demo --verify` (determinism, seek, branch must stay bit-exact).
 - **New native function:** implement in `core/src/`, declare in a header, bind in `core/src/bindings.cpp`, mirror in `app/native/numpy_engine.py`, dispatch in `app/native/__init__.py`, compare in `self_test()`.
 - **Page behaviour for every page:** edit `CanvasPage` only (browser pages: `BrowserPage`).
+- **New Python library:** add it to `nix/python.nix` (runtime or development); the package, checks and `nix-shell` all pick it up.
 - **New engine:** a package folder (`engines/<name>/`, or anywhere, then Settings → Engines → Add) with `engine.json` and `engine.py`: `class XEngine(Engine)` + `EngineManifest` (every request with its effect, `example` for read-only ones, `shape` of the answer); one `on_<request>(payload, job)` per request; open stores in `start()` (its own thread and connection); optional `views.py` registering view types with `engine="<id>"`. No Qt, views, modules or other engines in the engine code (checked); `app/` never imports an engine package's internals, only `engines.kernel` / `runtime` / `toolkit` (checked). `"core": true` in engine.json keeps an engine attached. To ask another engine, list it in `MANIFEST.uses` (and engine.json `uses`) and call `self.ask("other.request", payload)`; carry on when it answers `not_attached`. To hear its events, `self.watch("other.changed", handler)` in `start()` (the handler runs on your engine's thread). Run `python -m engines.kernel.conformance FOLDER` until every check passes. Guide: `examples/engines/README.md`.
 - **New view type:** a QWidget with `__init__(host)`, `set_data(TableData)`, `set_selection(id)` (optional `extend_view_menu(menu)`); `register_view_type(ViewType(id, title, description, shapes, cls, slots, requests=…, accepts=…))` in `app/views/types/` (add it to `BUILT_IN`, or `LIBRARY_VIEWS` if it needs Library requests). Only talk to `host`; other engine requests go through `host.request()` and are listed in `requests` (docs/views-api.md).
 - **New page kind:** a `PAGE_KIND_*` + icon + noun in `pages.py`, a page class in `app/ui/pages/`, a branch in `MainWindow._build_page()`, a button on the Create New panel that emits `kind_requested(kind)` (see `InfiniteCanvasPage`).
@@ -89,9 +91,12 @@ python tools/check_standard.py          # header / index / sections / dated note
 python -m pytest -q                     # tests (offscreen Qt, temporary database)
 ```
 
+When the change touches packaging (`flake.nix`, `nix/`, CMake files, Python libraries) or how DevOS starts, also run `nix --extra-experimental-features 'nix-command flakes' flake check -L` (tests, standard, conformance, physics, smoke, NixOS VM test).
+
 ## 5. Working rules
 
 - Run things inside `nix-shell` (Python, Qt, numpy, pyqtgraph, trimesh, cmake, pybind11 live there).
+- **Nix:** never `sudo nixos-rebuild switch`, never edit `/etc/nixos` or the user's Nix settings; validate with `nix build .#<pkg>`, `nix flake check` and its VM tests. Flakes only see files git knows: `git add` new files (staging is fine; still one commit per session). Flakes aren't enabled globally on the dev machine: pass `--extra-experimental-features 'nix-command flakes'`.
 - Headless runs: `QT_QPA_PLATFORM=offscreen`; use `DEVOS_DATA_DIR=$(mktemp -d)` so tests never touch the user's database (`~/.local/share/devos/devos.sqlite3`).
 - **Commits: one commit per session, sequenced at the end** (more only for a major version). Don't commit mid-session.
 - **Session routine:**

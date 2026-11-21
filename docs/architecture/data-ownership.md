@@ -4,7 +4,7 @@ What DevOS stores today, where, who writes it, and which engine of the [engine p
 
 **Owner** is the engine that will be the only code allowed to read and write that data directly. **Workspace** means it describes how your desk is arranged, and stays in the workspace database (`devos.sqlite3`) after the engine phases.
 
-As of 2026-11-17 (Phase 5 done: templates replace the Data-group modules; Phase 5a: Data owns record collections and reads / writes the Library's tables; Knowledge owns the Library; phase numbers as renumbered on 2026-11-17 for the OS-layer direction).
+As of 2026-11-17 (Phase 5 done: templates replace the Data-group modules; Phase 5a: Data owns record collections and reads / writes the Library's tables; Knowledge owns the Library; phase numbers as renumbered on 2026-11-20: Phase 6 is Portable DevOS, whose sync (6d) will add a "Synced" column here).
 
 ## The data folder
 
@@ -15,20 +15,20 @@ As of 2026-11-17 (Phase 5 done: templates replace the Data-group modules; Phase 
 | Namespace | Tables | Written by today | What it holds | Owner | Moves in |
 |---|---|---|---|---|---|
 | (database) | `schema_versions` | `Database.migrate` | Migration version per namespace | Workspace | stays |
-| core | `module_instances`, `module_settings` | `ModuleContext`, every module's `save_setting()` | Each module tile's identity and settings (JSON). Settings include view state *and* some data references (selected record, dataset, note, site URL) | Workspace; data references are re-pointed at engine ids when their module becomes a template | Phases 4–11 (5 done) |
-| core | `canvas_layouts` | `ModuleCanvas`, `InfiniteCanvas`, `BlockCanvas` (via settings) | Page and Canvas layouts: which module sits where | Workspace; module kinds map to templates in Phase 5c (Spatial's in 8a); pages become Hyprland workspaces in 7a | 5c ✔, 7a |
-| core | `user_preferences` | Window, sidebar, log panel, `agents.ollama_url`, `engines.detached` … | App-wide preferences (incl. which engines you detached) | Workspace; engine settings (e.g. the Ollama address) go to their engine | 11 |
+| core | `module_instances`, `module_settings` | `ModuleContext`, every module's `save_setting()` | Each module tile's identity and settings (JSON). Settings include view state *and* some data references (selected record, dataset, note, site URL) | Workspace; data references are re-pointed at engine ids when their module becomes a template | Phases 4–12 (5 done) |
+| core | `canvas_layouts` | `ModuleCanvas`, `InfiniteCanvas`, `BlockCanvas` (via settings) | Page and Canvas layouts: which module sits where | Workspace; module kinds map to templates in Phase 5c (Spatial's in 9a); pages become Hyprland workspaces in 8a | 5c ✔, 8a |
+| core | `user_preferences` | Window, sidebar, log panel, `agents.ollama_url`, `engines.detached` … | App-wide preferences (incl. which engines you detached) | Workspace; engine settings (e.g. the Ollama address) go to their engine | 12 |
 | pages | `page_folders`, `pages` | `PageStore` | Your pages, folders, favourites, page kind and state | Workspace | stays |
 | activity_log | `log_sessions`, `log_entries` | `ActivityLog.flush()` | System Log history | Workspace | stays |
 | content | `content_items` | The Knowledge engine only (`engines/knowledge/store.py`, its own connection) since Phase 4; everything else asks it (`app.clients.library`) | Index of Library files: name, kind, file name, size, metadata | Knowledge | done (4) |
 | records | `record_collections` (+ `noun`, `defaults_json`: the collection's schema from its template, since 5c), `record_items` (+ expression indexes `record_items_value_*`) | The Data engine (`engines/data/records.py`, its own connection) since Phase 5a | Records with JSON values (indexed); user-added properties, formula properties (computed, never stored) | Data | done (5a) |
 | records_adapter | `records_adapter_defaults` | Nobody since Phase 5c (Data copies it onto `record_collections` at start) | Phase 2's collection schemas | Data | kept one version, then removed |
 | templates | `templates_user` | `TemplateStore` (Save as template…) | Your templates: views, settings and layout as JSON (never data) | Workspace | stays |
-| map | `map_places` | `MapStore` | Your places | Spatial (copied into a GeoPackage layer) | 8a |
-| agents | `agents_conversations`, `agents_messages` | `ChatStore` | Agent chats | Conversation | 11 |
-| comms | `comms_accounts`, `comms_messages`, `comms_threads`, `comms_texts` | `CommsStore` | Mail accounts, cached mail headers and bodies, local text threads | Conversation | 11 |
-| trading_chart | `trading_chart_bars`, `trading_chart_backtests` | Financial Chart store | Cached market bars, saved backtests | Signals | 10 |
-| wave_sim | `wave_sim_materials`, `wave_sim_snapshots` | Wave Simulator store | Custom materials, saved simulation snapshots | Simulation | 9 |
+| map | `map_places` | `MapStore` | Your places | Spatial (copied into a GeoPackage layer) | 9a |
+| agents | `agents_conversations`, `agents_messages` | `ChatStore` | Agent chats | Conversation | 12 |
+| comms | `comms_accounts`, `comms_messages`, `comms_threads`, `comms_texts` | `CommsStore` | Mail accounts, cached mail headers and bodies, local text threads | Conversation | 12 |
+| trading_chart | `trading_chart_bars`, `trading_chart_backtests` | Financial Chart store | Cached market bars, saved backtests | Signals | 11 |
+| wave_sim | `wave_sim_materials`, `wave_sim_snapshots` | Wave Simulator store | Custom materials, saved simulation snapshots | Simulation | 10 |
 
 ### `library/<kind>/`: files
 
@@ -43,7 +43,7 @@ Files have random names on disk; `content_items` maps them to the names you see.
 | database | `.sqlite3` `.db` | Database Editor (create, import) | Data |
 | graph | `.kuzu` | Graph Database | Data |
 | sheet | `.xlsx` `.ods` `.csv` | Spreadsheet | Data |
-| geo | `.geojson`; `.gpkg` from Phase 8 | Map (import, "My places" export) | Spatial |
+| geo | `.geojson`; `.gpkg` from Phase 9 | Map (import, "My places" export) | Spatial |
 | image | `.png` … | Capture tool, browser downloads | Knowledge |
 | file | anything else | Records "Export as JSON", browser downloads, Library import | Knowledge |
 
@@ -65,7 +65,7 @@ User databases, CSV datasets, sheets and graphs are also written in place by the
 |---|---|---|
 | System keyring, service `devos-comms` | Mail passwords | Conversation |
 | System keyring, service `devos-agents` | Claude / Gemini API keys | Conversation |
-| System keyring (from Phase 8) | Census API key | Spatial |
+| System keyring (from Phase 9) | Census API key | Spatial |
 | `~/.cache/devos.log` | Warnings and errors echoed by `run.sh` | Shell |
 | `~/.n8n/` | n8n workflows and credentials | n8n itself; Services supervises it |
 | Ollama's model folder | Pulled models | Ollama itself; Services supervises it |

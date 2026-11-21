@@ -8,6 +8,10 @@ Purpose:
 
 # Updates
 
+- **[2026-11-20] Phase 6a: DevOS installs the same way on any NixOS machine.**
+  - **A pinned flake:** `nix run` starts DevOS anywhere; `programs.devos.enable = true;` (NixOS or home-manager) installs it with its menu entry. The C++ maths and the physics engine are built by Nix, not on the first launch, and every machine gets the identical build.
+  - **Checked end to end:** `nix flake check` runs the tests, the code standard, the engine conformance kits, the physics tests, a smoke run of the installed app and a fresh NixOS VM that starts DevOS as a normal user.
+  - **Next (Phase 6b–d):** sign in on any machine and see the same pages, records and files, synced through a server you run yourself.
 - **[2026-11-17] Engine plan, Phase 5 done: templates (v0.3.0).**
   - **Templates:** Projects, Agents, Events, Database, Spreadsheet, Graph database and Dataset chart are templates now: views over the Data engine, laid out and ready, with their own buttons (*New…*, *Import…*, *Export…*, *+ Table*, *+ Sheet*, *Sample graph*, *Sample data…*). File templates pick which database, workbook, dataset or graph they show, and which table.
   - **Your pages are unchanged:** tiles of the old Database Editor, Spreadsheet, Graph Database, Graph, Calendar, Projects and Agents open as the matching template with the same file, table and console history. Their views replace the old blocks (the explorer, selection statistics and properties panels are gone; the table picker, Grid, Chart and SQL console do that work).
@@ -81,13 +85,40 @@ Purpose:
 
 ## Tools/Startup
 
-To start the app:
+### Install on any NixOS machine (reproducible)
 
-1. CD into the project folder devos, currently the folder location is: projects/devos project/devos
-2. Run nix-shell
-3. run python -m app.main
+DevOS is a pinned Nix flake: every machine builds exactly the same DevOS (nixpkgs is locked in `flake.lock`). Your data stays in `~/.local/share/devos/` either way.
 
-To add DevOS to the app menu and desktop (one time, from the same folder):
+- **Try it without installing:** `nix run github:devnsim/devos` (or `nix run .` in a checkout).
+- **Install it with a plain `/etc/nixos/configuration.nix`** (the default on a new NixOS install; no flakes needed). `programs.devos` only exists once DevOS's module is imported:
+  ```nix
+  imports = [
+    "${builtins.fetchTarball "https://github.com/devnsim/devos/archive/main.tar.gz"}/nix/nixos.nix"
+  ];
+  programs.devos.enable = true;              # withN8n = true; bundles n8n (large)
+  ```
+  Then `sudo nixos-rebuild switch`. To pin a version, use a commit instead of `main` (`archive/<commit>.tar.gz`).
+- **Install it with a flake-based system configuration:** add the flake as an input and import its module.
+  ```nix
+  # flake.nix of your system
+  inputs.devos.url = "github:devnsim/devos";
+  # in nixosConfigurations.<host>.modules:
+  devos.nixosModules.default
+  { programs.devos.enable = true; }
+  ```
+  For one user without a system rebuild: `devos.homeManagerModules.default` with the same option.
+- **Without flakes:** `nix-build` (then `./result/bin/devos`), from the same pins.
+- Flakes need `experimental-features = nix-command flakes` (or pass `--extra-experimental-features 'nix-command flakes'`).
+
+### Develop from a checkout
+
+1. `cd` into the project folder (`projects/devos project/devos`)
+2. `nix-shell` (or `nix develop`) - the same pinned nixpkgs as the package
+3. `python -m app.main`
+
+Checks before finishing work: `python tools/check_standard.py` and `python -m pytest -q`; everything (tests, standard, engine conformance, physics, a smoke run of the package, a NixOS VM test) with `nix flake check`.
+
+To add the checkout to the app menu and desktop (one time, from the same folder):
 ```sh
 ./install-desktop.sh
 ```
@@ -97,7 +128,10 @@ To add DevOS to the app menu and desktop (one time, from the same folder):
 
 ```
 devos/
-├── shell.nix                     # dev environment (Python, Qt6, NumPy, pyqtgraph, trimesh, gcc, cmake, pybind11)
+├── flake.nix, flake.lock         # the reproducible build: packages devos / devos-native / devos-physics, modules, checks
+├── default.nix                   # the same packages for nix-build (no flakes)
+├── nix/                          # nixos.nix (module without flakes), package.nix (the app), native.nix, physics.nix, python.nix (libraries), modules.nix, checks.nix, pkgs.nix, pinned.nix
+├── shell.nix                     # dev environment (Python, Qt6, NumPy, pyqtgraph, trimesh, gcc, cmake, pybind11), pinned like the flake
 ├── run.sh                        # launcher: builds the C++ engine on first run, then starts the app
 ├── install-desktop.sh            # one-time: adds DevOS to the app menu and desktop
 ├── assets/
@@ -206,7 +240,7 @@ devos/
 
 **Data:** everything lives in the data folder `~/.local/share/devos/` (override with `DEVOS_DATA_DIR`): `devos.sqlite3` (pages, settings, preferences, layouts, logs, the library index) and `library/<kind>/` (the user's files). Closing a tile removes it from the layout but keeps its data.
 
-**C++ engine:** `python -m app.native.build` (run.sh does this automatically the first time). Without it, DevOS uses the NumPy mirror (same results, ~3x slower); `python -c "from app import native; print(native.self_test())"` compares the two.
+**C++ engine:** `python -m app.native.build` (run.sh does this automatically the first time; the Nix package builds it as `devos-native`). Without it, DevOS uses the NumPy mirror (same results, ~3x slower); `python -c "from app import native; print(native.self_test())"` compares the two.
 
 **Pages are user data:** create them with the sidebar's **+** (or *Create New Page* in an empty pane), organise them in folders by drag and drop, rename them in the page heading, the sidebar (F2 / double-click) or the tab (double-click / right-click). Every page is a `CanvasPage` — **change `app/ui/pages/canvas_page.py` to change all pages.**
 
@@ -231,7 +265,11 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `close_sidebar_btn / open_sidebar_btn` | UI elements (`QToolButton`) | `Sidebar` / `TabArea` tab row | Close the sidebar / reopen it (open button only shows while closed). |
 | `*_COLOR` | Constants (`str`, hex) | `app/ui/theme.py` [2.1] | Palette. Use these instead of typing hex codes in widgets. |
 | `content_panel` | UI element (`QWidget`) | `MainWindow` | Right-hand side of the splitter: top bar + page stack. |
+| `default.nix` | File (Nix) | repo root | The flake's packages for `nix-build` without flakes, from the same pins (`nix/pinned.nix`). |
 | `DESKTOP_FILE_ID` | Constant (`str`) | `app/main.py` | `.desktop` launcher name without extension; must match the install script. |
+| `devos-native` | Nix package | `nix/native.nix` | The `devos_core` C++ extension built by Nix (named so `devos-core` stays free for the headless engine service). |
+| `devos-physics` | Nix package | `nix/physics.nix` | `core/physics` built and tested by Nix: `libdevos_physics.so`, headers, `devos_physics_cli`, the `devos_physics` Python module. |
+| `flake.nix` | File (Nix) | repo root | The reproducible build: packages, `apps.default`, dev shell, NixOS / home-manager modules, overlay and `checks` (pinned in `flake.lock`). |
 | `ICON_SIZE` | Constant (`QSize`, px) | `app/ui/widgets/sidebar.py` | Size of every sidebar / tab icon (16 × 16). |
 | `ICONS_DIRECTORY` | Constant (`Path`) | `app/ui/widgets/sidebar.py` | `assets/icons/`, where all SVG icons live. |
 | `load_icon()` | Function | `app/ui/widgets/sidebar.py` | Loads an SVG from `ICONS_DIRECTORY`; warns instead of crashing if missing. |
@@ -243,6 +281,7 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `page_selected` | Signal (`int`) | `Sidebar` | Emitted with the page index when an app is clicked. |
 | `page_stack` | UI element (`QStackedWidget`) | `TabGroup` | Shows the pane's selected page, or the empty-pane hint. |
 | `page_title_label / page_subtitle_label` | UI elements (`QLabel`) | Every page | Heading and grey sub-line at the top of a page; styled in `theme.py` [3.6]. |
+| `programs.devos` | NixOS / home-manager option | `nix/modules.nix` | `enable`, `package` (the flake's pinned build by default), `withN8n`: installs DevOS with its desktop entry. |
 | `SettingsPage` | Class (`QWidget`) | `app/ui/pages/settings_page.py` | The sidebar gear's page. Data section: the data folder, and backups (back up now, check, restore at next start). |
 | backup / `create_backup()` | Concept / function | `app/data/store/backup.py` | A copy of the data folder in `backups/<time>/` with a `backup.json` manifest (sizes, SHA-256, reason). SQLite is copied with the online backup API; unchanged files are hard-linked to the previous backup. `verify_backup()`, `prune_backups()`. |
 | safety backup | Concept | `app/data/store/backup.py`, `Database.migrate()` | A backup DevOS takes by itself before changing stored data (upgrading tables, restoring); its reason starts with "before". |
@@ -267,6 +306,7 @@ Alphabetical. **Where** = the file or the class that owns it.
 | `KnowledgeEngine` | Class (`Engine`) | `engines/knowledge/engine.py` | Engine id `knowledge`, a core engine: the only owner of the Library. File service (list, item, read_text, search, create_text, add_file, add_bytes, write_text, rename, export, path / new_path / register_path, unique_name, refresh_size), the source contract (`library` + one table per kind) and `links`; `changed` events. |
 | core engine | Concept | `engine.json` `"core": true`, `engines/runtime.py` | An engine DevOS keeps attached (Knowledge): `detach()` refuses it and Settings → Engines shows "· core". |
 | `library()` / `LibraryClient` / `LibraryItem` / `LibraryError` | Function / classes | `app/clients/library.py` | How modules and tools use the Library: small blocking calls over the bus with the old store's names; items are plain data (ask `path()` for a file). |
+| `SMOKE_TEST_READY` / `--smoke-test` | Constant (`str`) / CLI flag | `app/main.py` | `devos --smoke-test` builds the main window, prints this line and quits (Nix checks, VM tests). |
 | `watch_library()` | Function | `app/ui/engine_bridge.py` | `on_change(kind)` on the UI thread whenever the Library changes (`knowledge.changed`). |
 | `ContentStore` | Class | `engines/knowledge/store.py` | Knowledge's internal store: files in `<data dir>/library/<kind>/`, indexed in `content_items`. Only the engine uses it. |
 | `SourceModule` | Class (`ModuleView`) | `app/modules/source_module.py` | A module made of views over one engine source (`SOURCE`, `NOUN`, `VIEWS`, `DEFAULT_LAYOUT`; hooks `block_definition()`, `toolbar_start()`, `record_actions()` …). Notes, Library and `RecordsModule` use it. |
@@ -438,7 +478,7 @@ Alphabetical. **Where** = the file or the class that owns it.
 1. **`__init__.py` files** — Each folder under `app/` contains an `__init__.py`, which marks it as a Python package (a folder you can import from, e.g. `from app.ui.pages.canvas_page import CanvasPage`). They're currently blank, which is normal. Keep them even though they're empty: without them, Python can confuse our `app` folder with other folders of the same name, and tools like pytest and Nix packaging expect them. Later they can hold code that runs whenever the package is imported, such as a version number (`__version__ = "0.1.0"`) or shortcut imports.
 
 2. On Launching from the desktop icon:
-    - The app will take a few seconds to launch as it launches a nix-shell session each time.
+    - From a checkout, the app takes a few seconds to launch as it starts a nix-shell session each time (the installed package starts directly).
     - If clicking the icon does nothing there may be an error. To check the log, run: cat ~/.cache/devos.log
     - If you move or rename the project folder, run ./install-desktop.sh again to update the paths.
 

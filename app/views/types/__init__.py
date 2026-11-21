@@ -3,12 +3,13 @@
 # OVERVIEW: The built-in view types. Importing this package registers them (app.views.api.view_type() does
 #           it on first use).
 # PURPOSE:
-#   1. One place that lists every built-in view type; engine-bundled views (Phase 3) and user views (Phase 12)
+#   1. One place that lists every built-in view type; engine-bundled views (Phase 3) and user views (Phase 13)
 #      register the same way.
 # CONTRACT:
 #   - Requires: app.views.types (table, grid, board, timeline, calendar, form, chart, document, links, network)
 #   - Exposes: BUILT_IN (type ids in picker order), LIBRARY_VIEWS, GRAPH_VIEWS
 # NOTES:
+#   - [2026-11-20] Phase references renumbered (a new Phase 6, Portable DevOS, comes before the OS layer).
 #   - [2026-11-17] Phase 5b: Grid, Chart (any table) and Network (graph tables) view types.
 #   - [2026-11-17] Document and Links view types (Phase 4).
 #   - [2026-11-17] Created in Phase 2 of the engine plan.

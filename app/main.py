@@ -8,12 +8,14 @@
 #   4. Opens the main window and keeps the app running until it is closed.
 #   5. Starts the activity log session: hooks for unhandled errors and Qt warnings, start-up steps,
 #      database attached for saving, session ended (and flushed) on quit.
-#   Run from the project root with:  python -m app.main
+#   6. --smoke-test: builds the main window, prints SMOKE_TEST_READY and quits (Nix checks, VM tests).
+#   Run from the project root with:  python -m app.main   (installed: devos)
 # CONTRACT:
 #   - Requires: app.ui.main_window.MainWindow, app.ui.theme.STYLESHEET, app.data.activity_log, app.native,
-#               assets/devos.svg, devos.desktop (created by the install script)
-#   - Exposes: main() -> int (process exit code)
+#               assets/devos.svg, devos.desktop (Nix package, or install-desktop.sh for a checkout)
+#   - Exposes: main(argv=None) -> int (process exit code); command line: [--smoke-test]
 # NOTES:
+#   - [2026-11-20] --smoke-test (Phase 6a): proves an installed DevOS starts, without a person to close it.
 #   - [2026-11-17] Engines (engines.runtime) are shut down at exit.
 #   - [2026-11-17] Start-up applies a restore chosen in Settings, then holds the data folder's running lock.
 #   - [2026-11-16] Shuts Qt WebEngine down in order after the event loop (no segfault on quit).
@@ -33,6 +35,8 @@
 # - DESKTOP_FILE_ID (str): .desktop launcher name without extension; must match the
 #   file the install script creates (default: "devos").
 # - exit_code (int): Value returned by app.exec() when the window closes (0 = normal exit).
+# - SMOKE_TEST_READY (str): Line printed once the window is built and the event loop ran (--smoke-test).
+# - SMOKE_TEST_DELAY_MS (int): How long the smoke test lets the event loop run before quitting (1500).
 # ==============================================================================
 
 # ==============================================================================
@@ -52,7 +56,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QtMsgType, qInstallMessageHandler
+from PySide6.QtCore import QTimer, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -64,6 +68,8 @@ from app.data.activity_log import get_activity_log
 # ==============================================================================
 APP_NAME = "DevOS"
 DESKTOP_FILE_ID = "devos"
+SMOKE_TEST_READY = "DevOS smoke test: ready"
+SMOKE_TEST_DELAY_MS = 1500                       # long enough for the first paint and deferred start-up work
 APP_ICON_PATH = Path(__file__).parent.parent / "assets" / "devos.svg"
 # --- END [1.2] ---
 
@@ -90,7 +96,11 @@ def _restore_and_lock_data(log) -> None:
         log.warning("devos", "Another DevOS seems to be using the same data folder")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv if argv is None else argv)
+    smoke_test = "--smoke-test" in argv
+    if smoke_test:
+        argv.remove("--smoke-test")              # Qt never sees it
     log = get_activity_log()
     log.install_hooks()                              # unhandled errors -> System Log
     qInstallMessageHandler(_qt_message_handler)
@@ -99,7 +109,7 @@ def main() -> int:
 
     from app.ui.web_support import prepare_web_engine, shutdown_web_engine
     prepare_web_engine()                             # before QApplication (browser pages)
-    app = QApplication(sys.argv)
+    app = QApplication(argv)
     app.setApplicationName(APP_NAME)
     log.info("devos", f"Qt {__import__('PySide6').__version__} on the '{app.platformName()}' display platform")
     if not APP_ICON_PATH.exists():
@@ -125,6 +135,11 @@ def main() -> int:
         main_window = MainWindow()
     main_window.show()
     log.success("devos", "Ready")
+    if smoke_test:
+        def finish_smoke_test() -> None:
+            print(SMOKE_TEST_READY, flush=True)
+            app.quit()
+        QTimer.singleShot(SMOKE_TEST_DELAY_MS, finish_smoke_test)
 
     exit_code = app.exec()
     main_window.close()

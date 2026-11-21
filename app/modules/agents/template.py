@@ -3,7 +3,7 @@
 # OVERVIEW: The Agents template's own parts: agent properties, the agent definition file, and AgentsExtension
 #           (the Chat block, Chat / settings / Export agent file buttons, "Chat with agent" on every record).
 #           The Agents template (app/templates/builtin.py) is a records template over "agents" with this
-#           extension; chatting and running agents move to the Conversation engine in Phase 10.
+#           extension; chatting and running agents move to the Conversation engine in Phase 11.
 # PURPOSE:
 #   1. AGENT_PROPERTIES, AGENT_PRESETS (Claude / Gemini / Ollama agent), agent_definition(record).
 #   2. AgentsExtension(module): extra_block_specs(), record_actions(), add_toolbar_actions(row); base_urls(),
@@ -15,6 +15,7 @@
 #   - Exposes: AgentsExtension(module), AGENT_PROPERTIES, AGENT_PRESETS, agent_definition(record) -> str,
 #              PERMISSION_TOOLS, OLLAMA_URL_PREFERENCE
 # NOTES:
+#   - [2026-11-20] Phase references renumbered (a new Phase 6, Portable DevOS, comes before the OS layer).
 #   - [2026-11-17] Phase 5c: AgentsModule became the Agents template + this extension (file moved from view.py).
 #   - [2026-11-17] Library access goes through the Knowledge engine (app.clients.library), not the content store (Phase 4).
 #   - [2026-11-17] Chat: Provider property (Claude / Gemini / Ollama), Max output tokens, + New agent menu, a Chat

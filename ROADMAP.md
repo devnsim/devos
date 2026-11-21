@@ -1,6 +1,6 @@
 # DevOS Roadmap
 
-Last updated: **2026-11-17** (Phase 5 done, v0.3.0. Direction change: DevOS moves to the OS layer on NixOS + Hyprland; phases from 6 renumbered — see Now and Direction)
+Last updated: **2026-11-20** (new Phase 6, Portable DevOS: a reproducible flake and synced data across your machines, before the OS layer; the OS-layer phases are now 7–14. 6a done)
 
 The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog records what changed, and this file records where DevOS stands and what comes next. The design behind it (engines, data shapes, protocol, contracts) is in [docs/architecture/engine-plan.md](docs/architecture/engine-plan.md); what is stored where is in [docs/architecture/data-ownership.md](docs/architecture/data-ownership.md).
 
@@ -29,14 +29,40 @@ The future-facing companion to [CHANGELOG.md](CHANGELOG.md): the changelog recor
     - the view runtime (ViewHost, page-wide channels, shared subscriptions, view builder, Data view tiles);
     - docking: engine packages, attach / detach with placeholders, conformance kit, Settings → Engines, bus inspector.
 - **Engine plan:** Phases 0–5 done. Projects, Agents, Events, Database, Spreadsheet, Graph database and Dataset chart are templates over the Data engine; Notes and Library are views over Knowledge. The other modules still run as modules; they move into engines phase by phase.
-- **Runs as:** one Qt application that hosts the engines in-process (this becomes *embedded mode*, kept as a fallback when the DevOS desktop arrives in Phases 6–7).
+- **Installs as:** a pinned Nix flake (`nix run`, `programs.devos.enable`), or from a checkout with `nix-shell` / `run.sh` (Phase 6a).
+- **Runs as:** one Qt application that hosts the engines in-process (this becomes *embedded mode*, kept as a fallback when the DevOS desktop arrives in Phases 7–8).
 
 ## Now
 
-### Phase 6 — OS-layer foundation: flake, devos-core, processes (XL)
+### Phase 6 — Portable DevOS: a reproducible package and your data on every machine (L)
+DevOS installs the same way on any NixOS machine, and you sign in to see the same pages, records and files on each of them. Each machine keeps a **full copy** and works offline; a **sync server on your own always-on machine** carries changes between them. You rarely edit on two machines at once, so conflicts are settled simply (newest wins per row; files and databases keep a conflict copy). Decided 2026-11-20 (engine plan, Decisions).
+
+- **6a A reproducible package (M) · done 2026-11-20**
+  - `flake.nix` (nixpkgs pinned in `flake.lock`, the same revision as this machine's channel): `packages` `devos` (default), `devos-native` (core/src maths, built by Nix instead of on the first launch), `devos-physics` (core/physics: library, headers, CLI, Python module; its ctest runs in the build); `apps.default`; `devShells.default` (shell.nix, now on the same pin); `overlays.default`.
+  - `programs.devos.enable` as a NixOS module and a home-manager module (`nix/modules.nix`), pinned build by default, `withN8n` optional.
+  - Without flakes: `default.nix` (`nix-build`), `nix/nixos.nix` (the module for a plain `configuration.nix`: import it, then `programs.devos.enable`) and `shell.nix` read the same pin (`nix/pinned.nix`).
+  - `nix flake check`: tests, standard, conformance (every engine package), physics, smoke (`devos --smoke-test` from the store), and a NixOS VM with the module that starts DevOS as a normal user.
+- **6b Ids unique across machines (S; a data migration)**
+  - New pages, folders, records and Library items take ids from a per-device range: `device × 2⁴⁰ + counter` (the device number comes from the server at sign-in). Integers stay integers, so layouts, settings and `db:<item>/…` ids that hold them need no translation; existing rows keep theirs; ids stay below 2⁵³ (safe in JSON).
+  - Backup first; `tests/fixtures/data_v0` still opens.
+- **6c Sync server and sign-in (M)**
+  - `devos-sync` in the same flake (`services.devos-sync.enable` on your always-on machine): accounts with a username and password (argon2), one token per signed-in device (revocable), an append-only change log, Library files stored by content hash.
+  - Reached over Tailscale / WireGuard (recommended) or TLS behind a reverse proxy.
+- **6d The Sync engine (L)**
+  - A core engine: SQLite triggers record changes to synced tables in `sync_changes` (every engine's connection is covered without changing it); push / pull when the server is reachable; hybrid logical clocks order changes.
+  - **Synced:** pages and folders, layouts, tiles and their settings, your templates, records (Data), Library files and their index (Knowledge), chats, places, wave-sim materials and snapshots. **Per machine:** window geometry, detached engines, the System Log, browser profiles, market-data caches, keyring secrets.
+  - Remote changes are applied through their owner (`data.apply_changes`, `knowledge.apply_changes`; workspace tables by Sync itself), so views refresh as usual. Settings → Sync: sign in / out, devices, status, conflicts.
+- **Done when** a fresh NixOS VM installs DevOS from the flake; two VMs signed in to one `devos-sync` each see pages, records and notes made on the other; an edit on both shows a conflict copy; and stopping the server loses nothing.
+
+**Start here (6b).** The per-device id ranges: a `device` row in the workspace database, `sqlite_sequence` seeded per table, a migration with its backup, and fixture tests. Then 6c's server with its NixOS module and a VM test of sign-in.
+
+
+## Next
+
+### Phase 7 — OS-layer foundation: flake, devos-core, processes (XL)
 DevOS moves down a layer (see *Direction*): the engines run as a headless service, `devos-core`; DevOS windows and native apps become tiles that Hyprland arranges. This phase builds the ground for that without changing how DevOS looks today. Nothing in it touches the running desktop: everything is tried in a nested session or a VM.
 
-- **6.0 Spike (S) — go / no-go before the rest.** In a nested Hyprland session (a window on the current desktop):
+- **7.0 Spike (S) — go / no-go before the rest.** In a nested Hyprland session (a window on the current desktop):
   - QGIS starts chromeless from a customization profile (`QGISCUSTOMIZATION3.ini`), with a small PyQGIS adapter plugin that joins the bus;
   - a DevOS grid window shows the same GeoPackage layer; selecting a feature in either selects it in the other;
   - Hyprland window rules place both (matched by app id / window title);
@@ -44,49 +70,47 @@ DevOS moves down a layer (see *Direction*): the engines run as a headless servic
   - Zenoh from Python: a request / reply and an Arrow table through shared memory, timed against a plain Unix socket.
 
   **Done when** each item has a written result (works / works with caveats / doesn't) in `docs/architecture/os-layer-spike.md`, and the open questions below that depend on it are answered.
-- **6a Flake and the development loop (M)**
-  - `flake.nix` with `packages` (`devos`, `devos-core`), `devShells.default` (today's `shell.nix`, which stays as a thin flake-compat wrapper so `nix-shell` keeps working), `checks` (tests, `check_standard.py`, conformance kits).
+- **7a Flake and the development loop (M)**
+  - Builds on Phase 6a's flake: a `devos-core` package (the headless engines) and the desktop configs; VM tests with a headless Hyprland join `checks`.
   - **Three-speed iteration, never on the host session:**
     1. *seconds* — nested Hyprland in a window, configs from `./configs/`, its own `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR`;
     2. *minutes* — a `devos-desktop` `nixosConfiguration` run as a VM (`nixos-rebuild build-vm`, virtio-gpu), a whole session to log into and break;
     3. *automatic* — `pkgs.testers.runNixOSTest` VM tests (headless Hyprland) in `nix flake check`.
   - Agent rules in AGENTS.md: never `sudo nixos-rebuild switch` or edit `/etc/nixos`; validate with `nix flake check`, `nix build .#<pkg>`, nested sessions, `build-vm` and VM tests; raw configs live in `./configs/` until they are promoted into `./modules/` and `./pkgs/`.
-- **6b Engines as processes (L)** (was 13a)
+- **7b Engines as processes (L)** (was 13a)
   - `devos-core`: the engines in their own process, started as a `systemd --user` service (a slice per engine group).
   - Out-of-process hosts on the transport the spike picks (Zenoh recommended), Arrow tables in shared memory; the conformance kit runs against process hosts too. **`core/physics` docks first**, as its own process.
   - Selection and time channels move from the page (`ChannelHub`) onto the bus, so windows in different processes share a selection.
   - **Services through systemd:** start, stop, status and logs of n8n, Ollama, Jupyter … as `systemd --user` units over D-Bus (replaces the old Phase 11 supervisor; the Services engine becomes a thin client of systemd).
-- **6c The front end as a bus client (M)**
+- **7c The front end as a bus client (M)**
   - The DevOS app connects to `devos-core` when it runs, and hosts the engines itself when it doesn't (embedded mode, unchanged).
   - **Tile windows:** any tile can open as its own borderless window (title `devos:tile:<id>` for compositor rules), all from one Qt process: a template (several views on its block canvas), a single view, a form, a button panel.
 - **Done when** Data, Knowledge and physics run in `devos-core` under systemd; the DevOS app (embedded) and a tile window in a nested Hyprland session show the same data with linked selection; and the flake builds, its VM test passes, and today's test suite still passes in embedded mode.
 
-**Start here (6.0).** The spike, in a scratch folder (`spikes/os-layer/`), nothing wired into DevOS yet: nested Hyprland, QGIS customization profile + adapter plugin, a minimal grid window on the bus, LayerShellQt from PySide6, Zenoh shm timing. Write the results down before 6a.
+**Start here (7.0).** The spike, in a scratch folder (`spikes/os-layer/`), nothing wired into DevOS yet: nested Hyprland, QGIS customization profile + adapter plugin, a minimal grid window on the bus, LayerShellQt from PySide6, Zenoh shm timing. Write the results down before 7a.
 
 
-## Next
-
-### Phase 7 — The DevOS desktop on Hyprland (XL) (absorbs the old Displays phase)
+### Phase 8 — The DevOS desktop on Hyprland (XL) (absorbs the old Displays phase)
 The goal is your daily desktop: it should feel like DevOS does today (sidebar, pages, tabs, tiles), with the parts becoming desktop panels and any tile able to stand on its own like an app.
 
-- **7a Session and workspace manager**
+- **8a Session and workspace manager**
   - A NixOS module (`programs.devos-desktop` / `services.devos-core`) and a Hyprland configuration generated from Nix, pinned through the flake (Hyprland updates are deliberate).
   - A **workspace manager** service on the bus: a page is a Hyprland workspace; it opens and restores tiles and native apps, learns which window is which (Hyprland IPC events), and saves layouts.
   - New contracts: **tile manifests** (what a tile shows, which shapes it takes and gives, which channels it follows) and **route definitions** (which data goes to which tile; *pipelines are data*).
-- **7b Desktop panels:** the sidebar (pages, folders, favourites), the tab strip, the status bar and the System Log become layer-shell panels; tabs map to Hyprland groups (tabbed windows); Ctrl+K works across the desktop; Settings is a tile.
-- **7c Tile kinds:** template tiles (several views on a block canvas), view tiles, form tiles, control tiles (buttons and tool bags bound to actions), native app tiles (wrapped). Any tile floats, tiles, groups into tabs, and moves between workspaces and monitors.
-- **7d Display profiles:** named arrangements by monitor identity (desk; vehicle cockpit), bare full-screen surfaces, graceful unplugging, per-view redraw rates.
-- **7e Desktop essentials** for a daily driver: launcher, notifications, lock and idle, screenshots, clipboard, portals (`xdg-desktop-portal-hyprland`), polkit agent, network / audio / bluetooth.
+- **8b Desktop panels:** the sidebar (pages, folders, favourites), the tab strip, the status bar and the System Log become layer-shell panels; tabs map to Hyprland groups (tabbed windows); Ctrl+K works across the desktop; Settings is a tile.
+- **8c Tile kinds:** template tiles (several views on a block canvas), view tiles, form tiles, control tiles (buttons and tool bags bound to actions), native app tiles (wrapped). Any tile floats, tiles, groups into tabs, and moves between workspaces and monitors.
+- **8d Display profiles:** named arrangements by monitor identity (desk; vehicle cockpit), bare full-screen surfaces, graceful unplugging, per-view redraw rates.
+- **8e Desktop essentials** for a daily driver: launcher, notifications, lock and idle, screenshots, clipboard, portals (`xdg-desktop-portal-hyprland`), polkit agent, network / audio / bluetooth.
 - **Done when** you log into the DevOS session instead of KDE for a week without falling back; a saved workspace restores its pages, tiles and app windows across monitors; unplugging a monitor degrades gracefully; and embedded mode still passes its tests.
 
 ## Later
 
-**Order:** 6 → 7 in order (7 needs 6's processes and tile windows). After 7, 8–12 can go in any order; Spatial (8) is first by priority. 13 needs 6b. Sizes are relative: S is a session or two, M a handful, L a dozen or so, XL is split into sub-phases. Each phase ends with a minor version tag.
+**Order:** 6 → 7 → 8 in order (8 needs 7's processes and tile windows; 7 builds on 6's flake). After 8, 9–13 can go in any order; Spatial (9) is first by priority. 14 needs 7b and builds on 6's sync. Sizes are relative: S is a session or two, M a handful, L a dozen or so, XL is split into sub-phases. Each phase ends with a minor version tag.
 
-### Phase 8 — Spatial engine and the QGIS tile (XL) (was Phase 6)
+### Phase 9 — Spatial engine and the QGIS tile (XL) (was Phase 6)
 Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geometry), GeoPandas and pyogrio (tables with geometry), rasterio (rasters) and PDAL (lidar). Layers are stored as **GeoPackage** in the Library. **The map is QGIS itself**, as a native tile: a Nix wrapper (`devos-qgis-tile`) starts it chromeless from a customization profile, and a separate, GPL-licensed adapter plugin connects it to the bus (layers from the Library, selection both ways, project outputs into the Library). DevOS never imports PyQGIS; it talks to QGIS over the bus and through its files and `qgis_process`.
 
-- **8a Data, styling and the QGIS tile (first)**
+- **9a Data, styling and the QGIS tile (first)**
   - Import vector layers (Shapefile, GeoPackage, GeoJSON, KML, CSV with latitude / longitude) into GeoPackages; keep each layer's CRS and display in Web Mercator.
   - **US data connectors:**
     - Census Bureau cartographic boundary files: states, counties, tracts, block groups, ZCTAs.
@@ -102,7 +126,7 @@ Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geomet
   - **Cartographic output:** print layouts (title, legend, scale bar, north arrow, credits) rendered by QGIS through `qgis_process`, to PNG / PDF / SVG.
   - Templates: Map (the QGIS tile + a layer table), Census explorer, Places (the old Map module; its places are copied into a GeoPackage layer). Removes the `map` module.
   - **Done when** you can load a county's tracts with ACS median household income, style a natural-breaks choropleth, see it in the QGIS tile, select a tract there to see its row in DevOS, and export a print-quality PDF.
-- **8b Processing (later)**
+- **9b Processing (later)**
   - QGIS processing algorithms through `qgis_process`, as Spatial requests with progress streams, including the algorithm catalogue.
   - Spatial joins, buffers, dissolve and zonal statistics.
   - Geocoding (US Census Geocoder).
@@ -110,35 +134,35 @@ Built on GDAL / OGR (formats), PROJ (coordinate systems), GEOS / shapely (geomet
   - Lidar (LAS / LAZ through PDAL) as georeferenced point clouds.
 
 
-### Phase 9 — Simulation engine and the FreeCAD tile (XL) (was Phase 8)
-- Wraps `core/physics`, out of process since 6b: load, step, seek, branch and controls; worldline as Series / Tensor streams; contact events.
+### Phase 10 — Simulation engine and the FreeCAD tile (XL) (was Phase 8)
+- Wraps `core/physics`, out of process since 7b: load, step, seek, branch and controls; worldline as Series / Tensor streams; contact events.
 - Wave Simulator, RF Imaging and Tensor4D move in; their views (waterfall, 3D scatter, slice, heatmap; 3D scene with a timeline scrubber; RF controls) are DevOS micro-tiles shipped with the engine.
 - **FreeCAD as a native tile** (`devos-freecad-tile`: a minimal workbench profile and a bus adapter): parts and assemblies, STEP export into the Library, "part → scene" for physics. Replaces the CAD module and its Part Design workbench.
 - Templates: Physics scene, RF lab, Part design (FreeCAD tile + parameters form + physics scrubber).
 - **Done when** the physics demo runs with scrub / seek / branch from a DevOS tile, a FreeCAD part becomes a physics scene, and the CAD, Wave Sim, RF Imaging and Tensor Inspector modules are gone.
 
-### Phase 10 — Signals, streams and edge nodes (L) (was Phase 9)
+### Phase 11 — Signals, streams and edge nodes (L) (was Phase 9)
 - **Series store** (market bars, system history) with retention rules. Indicators work on any series. Strategies and backtests run as jobs.
 - **Stream sources:** tiny engines that only produce streams; manifest with shape, rate, units and schema. Connectors: serial, UDP, MQTT, WebSocket, file replay, market feeds, simulation output.
 - **Edge nodes:** RP2350 / ESP32 sensors publishing through `zenoh-pico` (or serial / MQTT bridges) straight onto the bus.
-- **Routing** uses the route definitions from 7a; a patch-bay tile edits them. One common clock and time channel. Record and replay. Decimation for display.
+- **Routing** uses the route definitions from 8a; a patch-bay tile edits them. One common clock and time channel. Record and replay. Decimation for display.
 - Views: candles with drawings, line / area, indicator panes, gauge / KPI, sparkline, backtest report, patch bay. Templates: Market chart, System dashboard, Sensor console.
 - **Done when** a live sensor stream from an edge node docks, records, replays in sync with another stream, and an indicator works on it as easily as on a price.
 
-### Phase 11 — Conversation engine and agent runtime (L) (was Phase 10)
+### Phase 12 — Conversation engine and agent runtime (L) (was Phase 10)
 - Threads, participants, messages and attachments. Connectors: Claude, Gemini, Ollama, IMAP / SMTP.
 - **Agent runtime:** tools are engine and tile requests from the manifests (QGIS and FreeCAD adapters included); permissions follow each request's effect; anything that writes, sends or spends asks first; every tool call is logged.
 - Views: chat, inbox, reader, composer, thread list, tool approvals. Templates: Agents, Inbox.
 - **Done when** an agent answers "which projects are blocked?" by querying the Data engine, and "which tracts have the highest rent burden?" by asking Spatial and showing them in the QGIS tile.
 
-### Phase 12 — User-written views and tile packages (S)
+### Phase 13 — User-written views and tile packages (S)
 - The plugin mechanism built-in and engine-bundled views use, opened to users: view and tile packages in `<data>/views/<name>/` (a manifest + a Python module); a permission prompt for actions; a kit with a guide, an example, a fake-engine harness and reload on save.
 - Python views run with the user's rights, so they load only from the user's own data folder.
 
-### Phase 13 — Distributed cluster and edge fleet (XL)
-- **13a** Network transport (the bus from 6b across machines) over a WireGuard mesh. Per-engine placement: local, remote, or auto with local fallback.
-- **13b** Multi-host NixOS: `nixosConfigurations` for `workstation`, `vehicle-cockpit` and `compute-worker`, deployed with deploy-rs or Colmena; k3s workers for heavy engines; GPU / AVX2 node labels. Workers keep no data, and secrets stay local.
-- **13c** The edge fleet (from Phase 10) provisioned and updated the same way.
+### Phase 14 — Distributed cluster and edge fleet (XL)
+- **14a** Network transport (the bus from 7b across machines) over a WireGuard mesh. Per-engine placement: local, remote, or auto with local fallback.
+- **14b** Multi-host NixOS: `nixosConfigurations` for `workstation`, `vehicle-cockpit` and `compute-worker`, deployed with deploy-rs or Colmena; k3s workers for heavy engines; GPU / AVX2 node labels. Workers keep no data, and secrets stay local.
+- **14c** The edge fleet (from Phase 11) provisioned and updated the same way.
 - **Done when** a physics run on a cluster node passes the same bit-exact `--verify` as a local run, and the vehicle-cockpit configuration deploys and restores its display profile.
 
 ## Done
@@ -273,7 +297,7 @@ What was built:
 
 ## Direction
 
-DevOS is a **host platform** for organising and visualising any kind of data: charts, sensors, images, lidar, census and real estate, simulations. **From Phase 6 it moves down to the OS layer** (decided 2026-11-17): instead of rebuilding GIS, CAD or office tools inside Qt, DevOS orchestrates data and arranges native apps and its own tiles on a NixOS + Hyprland desktop.
+DevOS is a **host platform** for organising and visualising any kind of data: charts, sensors, images, lidar, census and real estate, simulations. **From Phase 7 it moves down to the OS layer** (decided 2026-11-17): instead of rebuilding GIS, CAD or office tools inside Qt, DevOS orchestrates data and arranges native apps and its own tiles on a NixOS + Hyprland desktop.
 
 - **`devos-core`:** the engines (Knowledge, Data, Spatial, Simulation, Signals, Conversation), headless, as `systemd --user` services; docked, undocked and tested against the conformance kit as today.
 - **The bus:** the same messages in-process, between processes on one machine (shared-memory Arrow) and across machines (WireGuard) — one transport family from edge sensors to cluster workers (Zenoh is the likely choice).
@@ -292,9 +316,9 @@ Ideas raised but not yet placed in a phase:
 - Document view: reload a note that another view or window changed while it is open (today only the item you switch to is re-read).
 - Backlinks in the Document view (which notes link here), from Knowledge's `links`.
 - Shareable template files (held: templates stay local for now).
-- Views rendered in a browser on another machine or a tablet (after Phase 7).
+- Views rendered in a browser on another machine or a tablet (after Phase 8).
 - A GPU-side renderer for very large point clouds and many live views (when display profiles or lidar need it).
-- Sandboxed user views for views you didn't write yourself (decided in Phase 12).
+- Sandboxed user views for views you didn't write yourself (decided in Phase 13).
 - Comms text and calls (placeholders today; a provider is still to be chosen).
 - Real estate listings APIs, beyond public parcel and price-index data (licences to check).
 - A small MapLibre map tile for live tracks (vehicle GPS, sensors) where a full QGIS tile is too heavy.
@@ -303,15 +327,18 @@ Ideas raised but not yet placed in a phase:
 
 ## Open questions
 
-- **Phase 6.0 (spike):** Zenoh for the local process transport too (recommended if shared memory works well from Python), or a plain Unix socket first and Zenoh only across machines?
-- **Phase 6.0:** desktop panels from PySide6 need layer-shell (LayerShellQt has no Python bindings): write a small binding (recommended), fall back to Hyprland window rules (pinned, no focus), or build panels in another toolkit (Quickshell / QML)?
-- **Phase 6a:** which GPU does this machine (and the vehicle rig) have? NVIDIA needs extra care with Hyprland and in VMs (virtio-gpu GL); it decides how far the VM loop can go for graphics.
-- **Phase 6b:** when the DevOS app starts and `devos-core` isn't running, should it start the service (recommended) or host the engines itself (embedded mode)?
-- **Phase 7a:** a page = one Hyprland workspace (recommended), or several pages share a workspace? And who owns pages and layouts then: a new "desktop" engine (recommended), or the front end as today?
-- **Phase 7e:** desktop essentials from nixpkgs (fuzzel, mako, hyprlock, hypridle …) or DevOS-native panels where they overlap (launcher = Ctrl+K, notifications = System Log)?
-- **Phase 8:** the QGIS adapter plugin is GPL: keep it in its own repository / package (recommended), or a folder of this repository with its own licence?
-- **Phase 9:** retiring the Part Design workbench for FreeCAD loses its step-by-step guide; keep a guided "Part design" template over the FreeCAD tile, or rely on FreeCAD's own?
-- **Phase 7d / 13:** are all monitors on one machine, or can some belong to other machines (the vehicle rig)?
-- **Phase 12:** Python-only user views, or also a sandboxed option?
-- **Phase 13:** is this machine a k3s node or a client?
-- **Phase 13:** the Library's `path` / `new_path` only work on this machine; a remote Knowledge (or a remote engine using files) needs a file-transfer request. Stream bytes as attachments, or share a volume?
+- **Phase 6c:** should the server store your data encrypted (it only ever sees ciphertext)? Safer, but a forgotten password can't be recovered from the server copy: recommended yes, with a printed recovery key.
+- **Phase 6c:** do your machines already share a Tailscale / WireGuard network? It decides how `devos-sync` is reached (and whether it needs TLS).
+- **Phase 6d:** user SQLite databases, sheets and Kùzu graphs sync as whole files (a conflict copy when both changed). Is that enough, or should a database you edit on two machines merge row by row?
+- **Phase 7.0 (spike):** Zenoh for the local process transport too (recommended if shared memory works well from Python), or a plain Unix socket first and Zenoh only across machines?
+- **Phase 7.0:** desktop panels from PySide6 need layer-shell (LayerShellQt has no Python bindings): write a small binding (recommended), fall back to Hyprland window rules (pinned, no focus), or build panels in another toolkit (Quickshell / QML)?
+- **Phase 7a:** which GPU does this machine (and the vehicle rig) have? NVIDIA needs extra care with Hyprland and in VMs (virtio-gpu GL); it decides how far the VM loop can go for graphics.
+- **Phase 7b:** when the DevOS app starts and `devos-core` isn't running, should it start the service (recommended) or host the engines itself (embedded mode)?
+- **Phase 8a:** a page = one Hyprland workspace (recommended), or several pages share a workspace? And who owns pages and layouts then: a new "desktop" engine (recommended), or the front end as today?
+- **Phase 8e:** desktop essentials from nixpkgs (fuzzel, mako, hyprlock, hypridle …) or DevOS-native panels where they overlap (launcher = Ctrl+K, notifications = System Log)?
+- **Phase 9:** the QGIS adapter plugin is GPL: keep it in its own repository / package (recommended), or a folder of this repository with its own licence?
+- **Phase 10:** retiring the Part Design workbench for FreeCAD loses its step-by-step guide; keep a guided "Part design" template over the FreeCAD tile, or rely on FreeCAD's own?
+- **Phase 8d / 14:** are all monitors on one machine, or can some belong to other machines (the vehicle rig)?
+- **Phase 13:** Python-only user views, or also a sandboxed option?
+- **Phase 14:** is this machine a k3s node or a client?
+- **Phase 14:** the Library's `path` / `new_path` only work on this machine; a remote Knowledge (or a remote engine using files) needs a file-transfer request. Stream bytes as attachments, or share a volume?

@@ -4,6 +4,24 @@ All notable changes to DevOS. Versions follow [Semantic Versioning](https://semv
 Newest first. Each version has a matching git tag (`v0.1.0` = version 0.1.0).
 
 ## [Unreleased]
+Phase 6a (Portable DevOS): a reproducible package.
+
+### Added
+- `flake.nix` + `flake.lock` (nixpkgs pinned): packages `devos` (default), `devos-native` (the `devos_core`
+  extension), `devos-physics` (`core/physics`, ctest in the build); `apps.default`; `devShells.default`;
+  `overlays.default`; `nixosModules.default` and `homeManagerModules.default` (`programs.devos.enable`,
+  `package`, `withN8n`).
+- `checks`: tests, standard, conformance (every engine package), physics, smoke, and a NixOS VM test.
+- `nix/nixos.nix`: the NixOS module for a plain `configuration.nix` (no flakes), same pinned build.
+- `default.nix` (nix-build without flakes) and `nix/pinned.nix` (the flake's pin read from `flake.lock`).
+- `nix/python.nix`: the one list of Python libraries for the package, the checks and the dev shell.
+- `devos --smoke-test` (`app/main.py`): builds the main window, prints `SMOKE_TEST_READY` and quits.
+- `core/physics/CMakeLists.txt`: `install()` rules (library, headers, CLI, Python module).
+
+### Changed
+- `shell.nix` uses the pinned nixpkgs (was `<nixpkgs>`) and `nix/python.nix`.
+- Roadmap: a new Phase 6 (Portable DevOS: package + synced data) before the OS layer; the OS-layer phases are
+  now 7–14.
 
 ## [0.3.0] - 2026-11-17
 Engine plan Phase 5: the Data engine, its views and templates.

@@ -15,7 +15,7 @@ This is the design. Status and the phases are in [ROADMAP.md](../../ROADMAP.md);
 | **The physics engine is the model** for engines: no Qt, owns its data, declares its requests / events / streams, runs anywhere, is tested alone | 2026-11-17 |
 | **Dockable engines:** an engine can be attached or detached; nothing breaks when one is missing (its views show a placeholder and keep their settings). Engines are built in isolation and docked after passing the conformance kit | 2026-11-17 |
 | **The front end is the host:** largely independent of any engine, it only knows data shapes. Specialist views ship *with* their engine | 2026-11-17 |
-| **Displays from 1 to 10+ monitors:** modular windowing, pop-out views, display profiles (from Phase 7: through Hyprland) | 2026-11-17 |
+| **Displays from 1 to 10+ monitors:** modular windowing, pop-out views, display profiles (from Phase 8: through Hyprland) | 2026-11-17 |
 | **Dockable data streams** (later): sources linked to engines and to views | 2026-11-17 |
 | **Linked views are page-wide**, with an option to unlink a single view | 2026-11-17 |
 | **Standardise the contracts early** (envelope, manifests, shapes, query, errors, versions, conformance kit), never the internals | 2026-11-17 |
@@ -38,11 +38,17 @@ This is the design. Status and the phases are in [ROADMAP.md](../../ROADMAP.md);
 | **A tile can hold several views** (a template on its block canvas); tiles also come as single views, forms, button panels and native apps. The desktop keeps today's feel: sidebar, tabs and status bar become desktop panels, pages become workspaces | 2026-11-17 |
 | **Native apps are tiles, not rebuilds:** QGIS and FreeCAD run as Nix-wrapped, chromeless apps joined to the bus by small adapters (QGIS's is GPL, kept separate). LibreOffice is not bridged (the Data engine covers workbooks) | 2026-11-17 |
 | **Phases renumbered from 6** (none had started): 6 OS-layer foundation (with old 13a), 7 DevOS desktop (with old Displays), 8 Spatial + QGIS, 9 Simulation + FreeCAD, 10 Signals + edge nodes, 11 Conversation, 12 user views and tiles, 13 cluster and fleet; the Services supervisor becomes systemd units | 2026-11-17 |
+| **Portable DevOS comes before the OS layer:** a new Phase 6 (a reproducible flake + synced data across machines); the OS-layer phases become 7–14 (none had started) | 2026-11-20 |
+| **One pinned flake builds DevOS** (nixpkgs in `flake.lock`); `shell.nix` and `default.nix` read the same pin. The NixOS / home-manager modules install the flake's own build by default, so every machine runs the same DevOS. The native maths package is `devos-native` (`devos-core` stays the name of the headless engine service) | 2026-11-20 |
+| **Your data on every machine: a full copy on each, synced through a server you run** (`devos-sync`, on your own always-on machine, over Tailscale / WireGuard). Each machine works offline. Sign-in is a username + password; each device gets its own revocable token | 2026-11-20 |
+| **Sync conflicts are settled simply** (editing on two machines at once is rare): newest wins per row, ordered by hybrid logical clocks; Library files and user databases are never overwritten - the other version is kept as a conflict copy | 2026-11-20 |
+| **Ids stay integers, unique per device:** new rows take ids from `device × 2⁴⁰ + counter`, so stored references need no translation | 2026-11-20 |
+| **Sync is a core engine** that records changes with SQLite triggers and applies remote ones through each table's owner (Data, Knowledge; workspace tables itself). Secrets, browser profiles, caches, the System Log and per-machine preferences don't sync | 2026-11-20 |
 
 ## Architecture
 
 ```
-Desktop          Hyprland (from Phase 7): workspaces = pages · DevOS panels (sidebar, tabs, status) · display profiles
+Desktop          Hyprland (from Phase 8): workspaces = pages · DevOS panels (sidebar, tabs, status) · display profiles
                  tiles = DevOS tile windows (templates, views, forms, buttons) + native app tiles (QGIS, FreeCAD)
                  embedded mode: the same front end as one window with its own tabs and tiling
 Views            generic, by data shape (grid, board, timeline, calendar, form, chart, map, network, waterfall,
@@ -52,12 +58,13 @@ View runtime     ViewHost · view-type registry · shared subscriptions · view 
    ↕ events · requests · streams      (control: small JSON · data: Arrow attachments)
 Bus              publish / subscribe · request / reply · streams with cancel and back-pressure · inspector
    ↕
-Engine hosts     in-process (Phase 1) · own process under systemd, shared-memory Arrow (6b) · remote worker (13)
+Engine hosts     in-process (Phase 1) · own process under systemd, shared-memory Arrow (7b) · remote worker (14)
    ↕
 Engines          Knowledge · Data · Spatial · Simulation · Signals · Conversation · Services   (dockable)
 Stream sources   sensors, feeds, files on replay, simulation output                            (dockable)
    ↕ each engine owns its store
 Storage          workspace database · one store per engine · library files · system keyring · backups
+                 synced across your machines through devos-sync (Phase 6)
 ```
 
 ### How data flows
@@ -160,13 +167,13 @@ The phases, their status, what comes now and next, and the open questions live i
 |---|---|---|---|
 | Notes, Library | Knowledge | Notes, Library templates | 4 |
 | Projects, Calendar, Database Editor, Spreadsheet, Graph Database, Graph | Data | Templates Projects, Events, Database, Spreadsheet, Graph database, Dataset chart (same ids); view types grid, chart, network, sheet, consoles, structure | 5 ✔ |
-| Agents | Data + Conversation | Agents template: definitions (5 ✔), chat and runtime (11) | 5 · 11 |
-| Map | Spatial | QGIS tile; Map, Places, Census explorer templates | 8 |
-| Physics, CAD + Part Design, Wave Simulator, RF Imaging, Tensor Inspector | Simulation | FreeCAD tile; Physics scene, Part design, RF lab templates; waterfall / scatter / slice view types | 9 |
-| Financial Chart | Signals | Market chart template | 10 |
-| Comms | Conversation | Inbox template | 11 |
-| Software Monitor | systemd + Signals | System monitor template | 6b · 10 |
-| Web App | Desktop (+ systemd) | A wrapped browser tile; services started as systemd units | 6b · 7 |
+| Agents | Data + Conversation | Agents template: definitions (5 ✔), chat and runtime (12) | 5 · 12 |
+| Map | Spatial | QGIS tile; Map, Places, Census explorer templates | 9 |
+| Physics, CAD + Part Design, Wave Simulator, RF Imaging, Tensor Inspector | Simulation | FreeCAD tile; Physics scene, Part design, RF lab templates; waterfall / scatter / slice view types | 10 |
+| Financial Chart | Signals | Market chart template | 11 |
+| Comms | Conversation | Inbox template | 12 |
+| Software Monitor | systemd + Signals | System monitor template | 7b · 11 |
+| Web App | Desktop (+ systemd) | A wrapped browser tile; services started as systemd units | 7b · 8 |
 
 ## Protecting user data
 
